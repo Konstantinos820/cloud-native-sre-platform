@@ -5,7 +5,7 @@ and observable cloud-native application deployment.
 
 ---
 
-## 🗺️ Project Architecture Roadmap
+## Architecture Diagram
 
 This project is built incrementally, focusing on Site Reliability Engineering (SRE) best practices, automated quality gates, and GitOps workflows:
 
