@@ -1,8 +1,7 @@
 # -----------------
 # 1. BUILD STAGE
 # -----------------
-FROM python:3.12.18-slim-bookworm AS builder
-
+FROM python:3.12.13-slim-bookworm AS builder
 WORKDIR /app
 
 # Εγκατάσταση απαραίτητων εργαλείων και αναβάθμιση συστήματος για ασφάλεια
@@ -13,30 +12,36 @@ RUN apt-get update && apt-get upgrade -y && \
 
 COPY requirements.txt .
 # Install Python dependencies into /usr/local so they can be copied to the final image
-RUN pip install --no-cache-dir --prefix=/usr/local -r requirements.txt
-
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir --prefix=/usr/local -r requirements.txt
+    
 # Remove build tools to keep the builder clean and reduce attack surface
 RUN apt-get purge -y --auto-remove gcc build-essential && rm -rf /var/lib/apt/lists/*
 
 # -----------------
 # 2. RUNTIME STAGE
 # -----------------
-FROM python:3.12.18-slim-bookworm
+FROM python:3.12.13-slim-bookworm AS runtime
 
 WORKDIR /app
 
-# Εγκατάσταση μόνο των απαραίτητων runtime πακέτων (π.χ. πιστοποιητικά)
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get upgrade -y && \
     apt-get install -y --no-install-recommends ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    groupadd --gid 10001 appgroup && \
+    useradd --uid 10001 --gid appgroup --no-create-home --shell /usr/sbin/nologin appuser
 
-# Αντιγραφή των εγκατεστημένων βιβλιοθηκών από το build stage
 COPY --from=builder /usr/local /usr/local
 COPY src/ /app/src/
 
-ENV PATH=/usr/local/bin:$PATH
-ENV PORT=8000
+ENV PATH=/usr/local/bin:$PATH \
+    PORT=8000 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HOME=/tmp
+
+USER 10001:10001
 
 EXPOSE 8000
 
