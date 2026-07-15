@@ -38,6 +38,15 @@ jobs:
           cd app
           pytest --cov=src --cov-report=xml tests/
 
+      # Εγκαθιστούμε το Trivy με ασφάλεια απευθείας στο σύστημα του runner
+      - name: Install Trivy CLI
+        run: |
+          sudo apt-get install wget apt-transport-https gnupg lsb-release -y
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install trivy -y
+
       - name: Run Trivy FS Vulnerability Scan
         uses: aquasecurity/trivy-action@v0.28.0
         with:
@@ -46,6 +55,7 @@ jobs:
           exit-code: '1'
           severity: 'HIGH,CRITICAL'
           ignore-unfixed: true
+          skip-setup-trivy: true # Παρακάμπτει το σπασμένο auto-setup
 
   build-image:
     name: Build and Scan Docker Image
@@ -67,6 +77,15 @@ jobs:
           tags: sre-platform-api:test
           outputs: type=docker,dest=/tmp/image.tar
 
+      # Εγκαθιστούμε το Trivy και στο δεύτερο runner
+      - name: Install Trivy CLI
+        run: |
+          sudo apt-get install wget apt-transport-https gnupg lsb-release -y
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install trivy -y
+
       - name: Run Trivy Image Scan
         uses: aquasecurity/trivy-action@v0.28.0
         with:
@@ -75,3 +94,4 @@ jobs:
           format: 'table'
           exit-code: '1'
           ignore-unfixed: true
+          skip-setup-trivy: true # Παρακάμπτει το σπασμένο auto-setup
