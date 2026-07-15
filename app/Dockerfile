@@ -1,47 +1,35 @@
-# syntax=docker/dockerfile:1
-
-# ---------- Stage 1: builder ----------
-# Installs Python dependencies into an isolated virtualenv so the final
-# image doesn't need build tools (gcc, headers, etc.) at all.
-FROM python:3.12-slim AS builder
-
-WORKDIR /build
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
-
-# ---------- Stage 2: runtime ----------
-FROM python:3.12-slim AS runtime
-
-# libpq5 is the runtime (non-dev) Postgres client library needed by psycopg2.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends libpq5 \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd --gid 10001 appgroup \
-    && useradd --uid 10001 --gid appgroup --no-create-home --shell /usr/sbin/nologin appuser
-
-COPY --from=builder /opt/venv /opt/venv
+# -----------------
+# 1. BUILD STAGE
+# -----------------
+FROM python:3.12.16-slim-bullseye AS builder
 
 WORKDIR /app
-COPY src ./src
 
-ENV PATH="/opt/venv/bin:$PATH" \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    HOME=/tmp
+# Εγκατάσταση απαραίτητων εργαλείων και αναβάθμιση συστήματος για ασφάλεια
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends gcc build-essential && \
+    rm -rf /var/lib/apt/lists/*
 
-# Compatible with a read-only root filesystem: the app itself never writes
-# to disk (logs go to stdout, no local cache dirs), so /tmp is only needed
-# as a conventional writable scratch space for the runtime/libraries.
-USER 10001:10001
+COPY requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+# -----------------
+# 2. RUNTIME STAGE
+# -----------------
+FROM python:3.12.16-slim-bullseye
+
+WORKDIR /app
+
+# Αναβάθμιση πακέτων ασφαλείας και στο τελικό image
+RUN apt-get update && apt-get upgrade -y && \
+    rm -rf /var/lib/apt/lists/*
+
+# Αντιγραφή των εγκατεστημένων βιβλιοθηκών από το build stage
+COPY --from=builder /root/.local /root/.local
+COPY src/ /app/src/
+
+ENV PATH=/root/.local/bin:$PATH
+ENV PORT=8000
 
 EXPOSE 8000
 
