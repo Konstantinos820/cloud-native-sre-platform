@@ -10,7 +10,7 @@ jobs:
   lint-and-test:
     name: Lint & Test Application
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -24,7 +24,8 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r app/requirements-dev.txt
+          pip install -r app/requirements.txt
+          pip install black ruff pytest pytest-cov httpx
 
       - name: Run Black Formatter Check
         run: black --check app/src app/tests
@@ -35,17 +36,16 @@ jobs:
       - name: Run Pytest with Coverage
         run: |
           cd app
-          python -m pytest --cov=src tests/ --cov-report=xml
+          pytest --cov=src --cov-report=xml tests/
 
-      - name: Run Trivy FS Vulnerability Scan (Filesystem)
-        uses: aquasecurity/trivy-action@master
+      - name: Run Trivy FS Vulnerability Scan
+        uses: aquasecurity/trivy-action@v0.28.0
         with:
           scan-type: 'fs'
-          scan-ref: 'app/'
-          format: 'table'
-          exit-code: '1' # Θα κοκκινίσει το build αν βρει high/critical vulnerabilities
-          ignore-unfixed: true
+          scan-ref: '.'
+          exit-code: '1'
           severity: 'HIGH,CRITICAL'
+          ignore-unfixed: true
 
   build-image:
     name: Build and Scan Docker Image
@@ -68,7 +68,7 @@ jobs:
           outputs: type=docker,dest=/tmp/image.tar
 
       - name: Run Trivy Image Scan
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@v0.28.0
         with:
           input: /tmp/image.tar
           severity: 'HIGH,CRITICAL'
