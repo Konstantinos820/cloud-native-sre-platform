@@ -1,7 +1,8 @@
-fastapi~=0.115.0
-uvicorn[standard]~=0.32.0
-sqlalchemy~=2.0.35
-psycopg2-binary~=2.9.9
-pydantic~=2.9.2
-email-validator~=2.2.0
-prometheus-client~=0.21.0
+fastapi>=0.115.0
+uvicorn>=0.30.0
+prometheus-client>=0.20.0
+psycopg2-binary>=2.9.9
+pydantic>=2.7.0
+pydantic-settings>=2.2.0
+# Κλειδώνουμε τη starlette σε ασφαλή έκδοση που διορθώνει το CVE-2026-54283
+starlette>=0.45.0
