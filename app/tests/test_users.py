@@ -1,5 +1,7 @@
 def test_create_and_get_user(client):
-    response = client.post("/users", json={"email": "ada@example.com", "full_name": "Ada Lovelace"})
+    response = client.post(
+        "/users", json={"email": "ada@example.com", "full_name": "Ada Lovelace"}
+    )
     assert response.status_code == 201
     body = response.json()
     assert body["email"] == "ada@example.com"

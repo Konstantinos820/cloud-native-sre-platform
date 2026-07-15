@@ -29,7 +29,9 @@ from src.metrics import (
     USER_REGISTRATIONS_TOTAL,
 )
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 # Tracks whether "startup work" (DB table creation / migrations) has completed.
@@ -163,7 +165,9 @@ def create_user(payload: UserCreate, db: Session = Depends(get_db)):
         db.commit()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(status_code=409, detail="A user with this email already exists")
+        raise HTTPException(
+            status_code=409, detail="A user with this email already exists"
+        )
     db.refresh(user)
 
     # Business metric: increment only on a successful registration.
