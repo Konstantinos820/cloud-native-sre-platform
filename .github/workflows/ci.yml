@@ -38,7 +38,7 @@ jobs:
           cd app
           pytest --cov=src --cov-report=xml tests/
 
-      # 1. Εγκατάσταση του Trivy CLI
+      # 1. Native εγκατάσταση του Trivy CLI
       - name: Install Trivy CLI
         run: |
           sudo apt-get update && sudo apt-get install -y wget apt-transport-https gnupg lsb-release
@@ -47,10 +47,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y trivy
 
-      # 2. Σκανάρισμα του κώδικα απευθείας με Trivy CLI
-      - name: Run Trivy FS Vulnerability Scan
+      # 2. Σκανάρισμα κώδικα (Vulnerabilities & Secrets) με Trivy CLI
+      - name: Run Trivy FS Scan (Vulnerabilities & Secrets)
         run: |
-          trivy fs --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed .
+          trivy fs \
+            --scanners vuln,secret \
+            --exit-code 1 \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            .
 
   build-image:
     name: Build and Scan Docker Image
@@ -72,7 +77,7 @@ jobs:
           tags: sre-platform-api:test
           outputs: type=docker,dest=/tmp/image.tar
 
-      # 1. Εγκατάσταση του Trivy CLI
+      # 1. Native εγκατάσταση του Trivy CLI
       - name: Install Trivy CLI
         run: |
           sudo apt-get update && sudo apt-get install -y wget apt-transport-https gnupg lsb-release
@@ -84,4 +89,9 @@ jobs:
       # 2. Σκανάρισμα του παραγόμενου .tar image αρχείου
       - name: Run Trivy Image Scan
         run: |
-          trivy image --input /tmp/image.tar --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --format table
+          trivy image \
+            --input /tmp/image.tar \
+            --exit-code 1 \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --format table
