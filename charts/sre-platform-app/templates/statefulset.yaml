@@ -1,0 +1,104 @@
+# templates/statefulset.yaml
+#
+# Why StatefulSet (not Deployment) for Postgres: the database needs a
+# stable network identity (postgres-0 always maps to the same PVC, even
+# after a pod restart/reschedule) and dedicated, durable storage per
+# replica. A Deployment's pods are interchangeable and share no such
+# guarantee - fine for stateless apps, wrong for a database.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-postgres
+  labels:
+    {{- include "sre-platform-app.postgresLabels" . | nindent 4 }}
+spec:
+  serviceName: {{ .Release.Name }}-postgres-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "sre-platform-app.postgresSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sre-platform-app.postgresLabels" . | nindent 8 }}
+    spec:
+      # NOTE on security context: the official postgres image's entrypoint
+      # needs to run as root on first start to chown/prepare the PGDATA
+      # directory, then drops privileges internally (via gosu) to the
+      # postgres user before the server actually starts. Forcing
+      # runAsNonRoot here at the Kubernetes level fights that entrypoint
+      # and breaks first-time initialization. A production setup would use
+      # a purpose-built rootless Postgres image or an operator (e.g.
+      # CloudNativePG) that handles this correctly - noted here as a
+      # deliberate, documented trade-off rather than an oversight.
+      containers:
+        - name: postgres
+          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          imagePullPolicy: {{ .Values.postgres.image.pullPolicy }}
+
+          ports:
+            - name: postgres
+              containerPort: {{ .Values.postgres.containerPort }}
+              protocol: TCP
+
+          envFrom:
+            - secretRef:
+                name: {{ .Release.Name }}-postgres-credentials
+
+          env:
+            # Without this, Postgres stores data directly in the volume
+            # root, which the official image warns against (it gets
+            # confused by the lost+found dir some CSI drivers create there).
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+
+          resources:
+            requests:
+              cpu: {{ .Values.postgres.resources.requests.cpu }}
+              memory: {{ .Values.postgres.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.postgres.resources.limits.cpu }}
+              memory: {{ .Values.postgres.resources.limits.memory }}
+
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"
+            periodSeconds: 5
+            failureThreshold: 30
+
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ .Values.postgres.persistence.storageClassName }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.persistence.size }}

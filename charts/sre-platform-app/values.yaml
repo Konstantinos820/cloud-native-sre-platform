@@ -1,0 +1,87 @@
+# values.yaml
+#
+# Default configuration for the sre-platform-app chart.
+# Overridable per-environment with `-f values-<env>.yaml` or `--set`.
+
+app:
+  name: fastapi
+
+  image:
+    repository: sre-platform-api
+    tag: "local"
+    pullPolicy: IfNotPresent
+
+  replicaCount: 1
+
+  containerPort: 8000
+
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 8000
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+  # Rolling update strategy: never drop below full capacity (maxUnavailable: 0),
+  # allow one extra pod during the rollout (maxSurge: 25%) so new pods pass
+  # their readiness probe before old ones are terminated -> zero downtime.
+  updateStrategy:
+    maxSurge: 25%
+    maxUnavailable: 0
+
+  probes:
+    startup:
+      path: /health/startup
+      periodSeconds: 5
+      failureThreshold: 30 # 5s * 30 = 150s max time allowed to become ready
+    liveness:
+      path: /health/live
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+    readiness:
+      path: /health/ready
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+
+  env:
+    appName: sre-platform-api
+    appVersion: "0.1.0"
+
+postgres:
+  image:
+    # Floating minor-version tag on purpose: avoids the exact "patch tag
+    # doesn't exist yet" problem we hit earlier with the app's base image.
+    repository: postgres
+    tag: "16-bookworm"
+    pullPolicy: IfNotPresent
+
+  containerPort: 5432
+
+  # NOTE: plaintext here for Week 2 only. Week 3 replaces this block with
+  # Bitnami Sealed Secrets so real credentials never sit in Git as plaintext.
+  credentials:
+    user: app_user
+    password: app_password
+    database: app_db
+
+  persistence:
+    size: 1Gi
+    # Kind's built-in default StorageClass (local-path-provisioner) is
+    # literally named "standard".
+    storageClassName: standard
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi

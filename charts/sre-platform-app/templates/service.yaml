@@ -1,0 +1,37 @@
+# templates/service.yaml
+#
+# Two Services live in this one file: the regular ClusterIP Service that
+# load-balances traffic across the FastAPI replicas, and the headless
+# Service the PostgreSQL StatefulSet needs for stable per-pod DNS names
+# (postgres-0.<service>, postgres-1.<service>, ...).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-{{ .Values.app.name }}
+  labels:
+    {{- include "sre-platform-app.appLabels" . | nindent 4 }}
+spec:
+  type: {{ .Values.app.service.type }}
+  selector:
+    {{- include "sre-platform-app.appSelectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.app.service.port }}
+      targetPort: {{ .Values.app.service.targetPort }}
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-postgres-headless
+  labels:
+    {{- include "sre-platform-app.postgresLabels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "sre-platform-app.postgresSelectorLabels" . | nindent 4 }}
+  ports:
+    - name: postgres
+      port: {{ .Values.postgres.containerPort }}
+      targetPort: {{ .Values.postgres.containerPort }}
+      protocol: TCP

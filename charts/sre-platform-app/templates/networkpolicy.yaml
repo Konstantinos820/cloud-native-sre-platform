@@ -1,0 +1,26 @@
+# templates/networkpolicy.yaml
+#
+# Default-deny ingress on the Postgres pod, with a single explicit
+# allow-rule for traffic coming from FastAPI pods on the Postgres port.
+# Everything else in the cluster - other namespaces, other pods, a
+# compromised shell someone kubectl-exec's into - gets nothing.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-postgres-isolation
+  labels:
+    {{- include "sre-platform-app.postgresLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "sre-platform-app.postgresSelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "sre-platform-app.appSelectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.postgres.containerPort }}

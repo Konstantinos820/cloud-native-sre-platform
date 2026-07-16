@@ -1,0 +1,126 @@
+# templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-{{ .Values.app.name }}
+  labels:
+    {{- include "sre-platform-app.appLabels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.app.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: {{ .Values.app.updateStrategy.maxSurge }}
+      maxUnavailable: {{ .Values.app.updateStrategy.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "sre-platform-app.appSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sre-platform-app.appLabels" . | nindent 8 }}
+    spec:
+      # Belt-and-suspenders alongside the container-level securityContext below.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+
+      containers:
+        - name: {{ .Values.app.name }}
+          image: "{{ .Values.app.image.repository }}:{{ .Values.app.image.tag }}"
+          imagePullPolicy: {{ .Values.app.image.pullPolicy }}
+
+          ports:
+            - name: http
+              containerPort: {{ .Values.app.containerPort }}
+              protocol: TCP
+
+          env:
+            - name: APP_NAME
+              value: {{ .Values.app.env.appName | quote }}
+            - name: APP_VERSION
+              value: {{ .Values.app.env.appVersion | quote }}
+            - name: POSTGRES_HOST
+              # Must match the StatefulSet's headless Service name.
+              value: "{{ .Release.Name }}-postgres-headless"
+            - name: POSTGRES_PORT
+              value: "{{ .Values.postgres.containerPort }}"
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-postgres-credentials
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-postgres-credentials
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-postgres-credentials
+                  key: POSTGRES_DB
+
+          resources:
+            requests:
+              cpu: {{ .Values.app.resources.requests.cpu }}
+              memory: {{ .Values.app.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.app.resources.limits.cpu }}
+              memory: {{ .Values.app.resources.limits.memory }}
+
+          # --- The 3 probes -------------------------------------------------
+
+          # Gates the other two probes: Kubernetes won't even start running
+          # liveness/readiness checks until this one succeeds once. Gives the
+          # app room to run its startup/migration logic without being killed
+          # by an impatient liveness probe.
+          startupProbe:
+            httpGet:
+              path: {{ .Values.app.probes.startup.path }}
+              port: http
+            periodSeconds: {{ .Values.app.probes.startup.periodSeconds }}
+            failureThreshold: {{ .Values.app.probes.startup.failureThreshold }}
+
+          # No DB check here on purpose - a slow/unreachable DB should not
+          # cause Kubernetes to restart an otherwise-healthy process.
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.app.probes.liveness.path }}
+              port: http
+            periodSeconds: {{ .Values.app.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.app.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.app.probes.liveness.failureThreshold }}
+
+          # Active DB check (SELECT 1). Failing this pulls the pod out of the
+          # Service's endpoints without killing it.
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.app.probes.readiness.path }}
+              port: http
+            periodSeconds: {{ .Values.app.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.app.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.app.probes.readiness.failureThreshold }}
+
+          # --- Hardening ------------------------------------------------------
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+          volumeMounts:
+            # readOnlyRootFilesystem blocks writes everywhere, including /tmp -
+            # this emptyDir gives the process a writable scratch space (matches
+            # HOME=/tmp set in the Dockerfile) without loosening the rest of
+            # the filesystem.
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: tmp
+          emptyDir: {}

@@ -1,0 +1,14 @@
+apiVersion: v2
+name: sre-platform-app
+description: >-
+  Cloud-Native SRE Platform - FastAPI application + PostgreSQL,
+  packaged for local Kind deployment (Week 2 of the roadmap).
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - fastapi
+  - postgresql
+  - sre
+maintainers:
+  - name: Konstantinos Pappas
