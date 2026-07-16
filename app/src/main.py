@@ -66,8 +66,7 @@ app = FastAPI(title=settings.APP_NAME, version=settings.APP_VERSION, lifespan=li
 
 @app.middleware("http")
 async def prometheus_metrics_middleware(
-    request: Request, 
-    call_next: Callable[[Request], Awaitable[Response]]
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
 ) -> Response:
     # /metrics itself is excluded so scraping doesn't inflate its own counters.
     if request.url.path == "/metrics":
