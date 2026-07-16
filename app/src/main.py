@@ -14,6 +14,7 @@ Exposes:
 import logging
 import time
 from contextlib import asynccontextmanager
+from typing import Callable, Awaitable
 
 from fastapi import FastAPI, Depends, HTTPException, Response, Request
 from pydantic import BaseModel, EmailStr, ConfigDict
@@ -64,13 +65,16 @@ app = FastAPI(title=settings.APP_NAME, version=settings.APP_VERSION, lifespan=li
 
 
 @app.middleware("http")
-async def prometheus_metrics_middleware(request: Request, call_next):
+async def prometheus_metrics_middleware(
+    request: Request, 
+    call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
     # /metrics itself is excluded so scraping doesn't inflate its own counters.
     if request.url.path == "/metrics":
         return await call_next(request)
 
     start_time = time.perf_counter()
-    response = await call_next(request)
+    response: Response = await call_next(request)
     duration = time.perf_counter() - start_time
 
     # Use the matched route template (e.g. "/users/{user_id}") instead of the
