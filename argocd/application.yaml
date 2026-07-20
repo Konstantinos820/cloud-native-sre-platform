@@ -1,0 +1,44 @@
+# argocd/application.yaml
+#
+# This is the core GitOps object: instead of you running `helm upgrade`
+# by hand, ArgoCD's controller (running inside the cluster) polls this repo
+# every few minutes, compares the live cluster state to what's declared in
+# Git, and reconciles any drift automatically - a Pull model, not a Push
+# model. That's the answer to "why ArgoCD instead of deploying straight
+# from GitHub Actions" from your interview cheat sheet.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: sre-platform-app
+  namespace: argocd
+  # Ensures ArgoCD itself deletes this Application's child resources if the
+  # Application object is ever deleted - avoids orphaned resources.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/Konstantinos820/cloud-native-sre-platform.git
+    targetRevision: main
+    path: charts/sre-platform-app
+    helm:
+      valueFiles:
+        - values.yaml
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: sre-platform
+
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

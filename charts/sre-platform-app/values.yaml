@@ -65,8 +65,10 @@ postgres:
 
   containerPort: 5432
 
-  # NOTE: plaintext here for Week 2 only. Week 3 replaces this block with
-  # Bitnami Sealed Secrets so real credentials never sit in Git as plaintext.
+    # NOTE: plaintext placeholder for Week 2 only (local-only Kind cluster).
+    # Replaced by Bitnami Sealed Secrets in Week 3.
+    # This file is excluded from Trivy secret-scanning via --skip-files in ci.yml
+    # (Trivy's inline `trivy:ignore` comments don't apply to secret scanning or Helm files).
   credentials:
     user: app_user
     password: app_password
