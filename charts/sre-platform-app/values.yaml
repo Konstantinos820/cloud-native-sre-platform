@@ -11,7 +11,7 @@ app:
     tag: "local"
     pullPolicy: IfNotPresent
 
-  replicaCount: 1
+  replicaCount: 2
 
   containerPort: 8000
 
