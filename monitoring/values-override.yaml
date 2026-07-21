@@ -1,0 +1,23 @@
+# monitoring/values-override.yaml
+#
+# Minimal overrides on top of kube-prometheus-stack's defaults.
+prometheus:
+  prometheusSpec:
+    # Lets Prometheus discover ServiceMonitors from ALL namespaces, instead
+    # of only ones carrying a specific `release: <helm-release-name>` label -
+    # our own chart's ServiceMonitor lives in the `sre-platform` namespace,
+    # not `monitoring`.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorNamespaceSelector: {}
+
+grafana:
+  enabled: true
+  # NOTE: plaintext placeholder, same pattern as the Postgres credentials
+  # in Week 3 - will be replaced with a SealedSecret once this stack is
+  # confirmed working end-to-end.
+  adminPassword: "prom-operator-admin"
+  persistence:
+    enabled: false
+
+alertmanager:
+  enabled: true

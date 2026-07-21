@@ -1,0 +1,50 @@
+# argocd/monitoring-application.yaml
+#
+# Multi-source Application: source #1 is the public Helm chart repo,
+# source #2 is our own Git repo, used only to supply the values file via
+# the `$values` reference. This is the ArgoCD-native way to combine a
+# third-party chart with our own overrides - it avoids relying on ArgoCD
+# fetching an arbitrary raw HTTPS URL for values (disabled by default for
+# security reasons on most ArgoCD installs).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  sources:
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: kube-prometheus-stack
+      targetRevision: 86.2.3
+      helm:
+        valueFiles:
+          - $values/monitoring/values-override.yaml
+
+    - repoURL: https://github.com/Konstantinos820/cloud-native-sre-platform.git
+      targetRevision: main
+      ref: values
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # The Prometheus Operator's CRDs are large enough to hit the same
+      # client-side annotation size limit we hit earlier with ArgoCD's own
+      # CRDs - server-side apply avoids it the same way.
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

@@ -1,0 +1,21 @@
+# charts/sre-platform-app/templates/servicemonitor.yaml
+#
+# Tells the Prometheus Operator (installed by kube-prometheus-stack) to
+# scrape our FastAPI Service's /metrics endpoint. Matches the FastAPI
+# Service's `http` named port defined in service.yaml.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}-{{ .Values.app.name }}-monitor
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sre-platform-app.appLabels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "sre-platform-app.appSelectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
