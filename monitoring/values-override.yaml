@@ -24,3 +24,16 @@ alertmanager:
   alertmanagerSpec:
     # Tells Prometheus Operator to use our custom Secret created from SealedSecret
     configSecret: alertmanager-config
+
+# Disable system metrics scrapers that fail on local Kind clusters
+kubeControllerManager:
+  enabled: false
+
+kubeScheduler:
+  enabled: false
+
+kubeEtcd:
+  enabled: false
+
+kubeProxy:
+  enabled: false
