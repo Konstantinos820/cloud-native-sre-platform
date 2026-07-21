@@ -1,0 +1,18 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname', 'namespace']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 12h
+  receiver: 'discord-notifications'
+
+receivers:
+  - name: 'discord-notifications'
+    slack_configs:
+      - api_url: 'https://discord.com/api/webhooks/1529143109114528004/3OJlFUtfPB20JvaOS_A_ystoGTKyTxEpfLCFvznNt9ZTOwY768KXvd5CPjS8a8vwk3M0/slack'
+        channel: '#sre-alerts'
+        send_resolved: true
+        title: '{{ template "slack.default.title" . }}'
+        text: '{{ template "slack.default.text" . }}'

@@ -43,7 +43,7 @@ spec:
         summary: "High Latency Detected"
         description: "95th percentile response time is above 500ms."
 
-    # 4. Database Connection Failure
+    # 4. Database Connection Failure (Fixed to use kube-state-metrics)
     - alert: PostgresDown
       expr: kube_pod_status_ready{namespace="{{ .Release.Namespace }}", condition="true", pod=~".*postgres.*"} == 0
       for: 30s
@@ -51,7 +51,7 @@ spec:
         severity: critical
       annotations:
         summary: "PostgreSQL Database Down"
-        description: "PostgreSQL statefulset pod is not responding."
+        description: "PostgreSQL statefulset pod in namespace {{ .Release.Namespace }} is not ready."
 
     # 5. Pod Restart Loop
     - alert: FastAPIPodRestarting
