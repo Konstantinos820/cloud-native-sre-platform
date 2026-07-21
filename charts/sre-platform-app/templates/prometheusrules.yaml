@@ -4,6 +4,7 @@ metadata:
   name: {{ .Release.Name }}-{{ .Values.app.name }}-alerts
   namespace: {{ .Release.Namespace }}
   labels:
+    release: kube-prometheus-stack
     {{- include "sre-platform-app.appLabels" . | nindent 4 }}
 spec:
   groups:
