@@ -1,0 +1,63 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Release.Name }}-{{ .Values.app.name }}-alerts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sre-platform-app.appLabels" . | nindent 4 }}
+spec:
+  groups:
+  - name: sre-platform-alerts
+    rules:
+    # 1. High Error Rate (> 5%)
+    - alert: FastAPIHighErrorRate
+      expr: |
+        (sum(rate(http_requests_total{status_code=~"5.."}[2m])) 
+        / 
+        sum(rate(http_requests_total[2m]))) * 100 > 5
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "High HTTP 5xx Error Rate detected"
+        description: "FastAPI 5xx error rate is currently above 5% ({{ $value }}%)."
+
+    # 2. Pod Down
+    - alert: FastAPIPodDown
+      expr: up{namespace="{{ .Release.Namespace }}", job="{{ .Release.Name }}-{{ .Values.app.name }}"} == 0
+      for: 30s
+      labels:
+        severity: critical
+      annotations:
+        summary: "FastAPI Pod is Down"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is unreachable."
+
+    # 3. High Latency (p95 > 500ms)
+    - alert: FastAPIHighLatency
+      expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 0.5
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High Latency Detected"
+        description: "95th percentile response time is above 500ms."
+
+    # 4. Database Connection Failure
+    - alert: PostgresDown
+      expr: up{namespace="{{ .Release.Namespace }}", job=~".*postgres.*"} == 0
+      for: 30s
+      labels:
+        severity: critical
+      annotations:
+        summary: "PostgreSQL Database Down"
+        description: "PostgreSQL statefulset pod is not responding."
+
+    # 5. Pod Restart Loop
+    - alert: FastAPIPodRestarting
+      expr: increase(kube_pod_container_status_restarts_total{namespace="{{ .Release.Namespace }}", container="fastapi"}[5m]) > 0
+      for: 0m
+      labels:
+        severity: warning
+      annotations:
+        summary: "FastAPI Pod Restarting"
+        description: "Pod {{ $labels.pod }} has restarted in the last 5 minutes."

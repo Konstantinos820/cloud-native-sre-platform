@@ -21,3 +21,6 @@ grafana:
 
 alertmanager:
   enabled: true
+  alertmanagerSpec:
+    # Tells Prometheus Operator to use our custom Secret created from SealedSecret
+    configSecret: alertmanager-config
