@@ -45,7 +45,7 @@ spec:
 
     # 4. Database Connection Failure
     - alert: PostgresDown
-      expr: up{namespace="{{ .Release.Namespace }}", job=~".*postgres.*"} == 0
+      expr: kube_pod_status_ready{namespace="{{ .Release.Namespace }}", condition="true", pod=~".*postgres.*"} == 0
       for: 30s
       labels:
         severity: critical
