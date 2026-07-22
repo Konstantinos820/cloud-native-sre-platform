@@ -69,10 +69,7 @@ postgres:
     # Replaced by Bitnami Sealed Secrets in Week 3.
     # This file is excluded from Trivy secret-scanning via --skip-files in ci.yml
     # (Trivy's inline `trivy:ignore` comments don't apply to secret scanning or Helm files).
-  credentials:
-    user: app_user
-    password: app_password
-    database: app_db
+  
 
   persistence:
     size: 1Gi
