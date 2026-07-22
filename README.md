@@ -45,7 +45,7 @@ This project is built incrementally, focusing on Site Reliability Engineering (S
 * **Application:** FastAPI (Python 3.12), Pydantic, SQLAlchemy, PostgreSQL
 * **Orchestration & Packaging:** Kubernetes, Helm v3, Kind (Kubernetes in Docker)
 * **GitOps & Continuous Delivery:** ArgoCD, Bitnami Sealed Secrets
-* **Observability & Monitoring:** Prometheus Operator (`kube-prometheus-stack`), Alertmanager, Grafana, `kube-state-metrics`, `prometheus-fastapi-instrumentator`
+* **Observability & Monitoring:** Prometheus Operator (`kube-prometheus-stack`), Alertmanager, Grafana, `kube-state-metrics`, custom `prometheus_client` instrumentation
 * **CI/CD:** GitHub Actions
 * **Containerization:** Docker (Multi-stage builds, Bookworm slim images)
 * **Security & Hardening:** Trivy CLI (Vulnerability Scans), Network Policies, Non-root containers, Sealed Secrets encryption (TLS public key sealing)
@@ -151,22 +151,22 @@ The fourth phase implements full-stack observability and real-time alerting usin
 Implemented 5 key production-grade alerting rules packaged inside `charts/sre-platform-app/templates/prometheusrules.yaml`:
 
 * **`FastAPIHighErrorRate`:** Triggers when HTTP 5xx errors exceed 5% of total requests over a 5-minute window.
-* **`FastAPIPodDown`:** Triggers when ready application pods drop below the desired replica count (`kube_pod_status_ready == 0`).
+* **`FastAPIPodDown`:** Triggers when Prometheus can no longer scrape the FastAPI target at all (`up == 0` for the `sre-platform-app-fastapi` job).
 * **`FastAPIHighLatency`:** Triggers when the 95th percentile request latency exceeds 500ms over 5 minutes.
 * **`PostgresDown`:** Uses `kube_pod_status_ready` via `kube-state-metrics` to instantly alert if the database StatefulSet pod fails or goes unready.
-* **`FastAPIPodRestarting`:** Triggers if application containers restart more than twice within 15 minutes.
+* **`FastAPIPodRestarting`:** Triggers immediately on any container restart detected within a 5-minute window (`increase(...restarts_total[5m]) > 0`).
 
 ### 3. Alertmanager & Real-Time Discord Integration
 
-* Configured **Alertmanager** with custom routing rules and receivers to push alert notifications straight to a dedicated Discord channel (`#sre-alerts`).
-* Adapted Discord's webhook API using the `/slack` compatibility endpoint suffix (`.../slack`).
-* Validated full end-to-end alerting lifecycle: successfully received live **`[FIRING]`** incidents (e.g., `Watchdog`) and automatic **`[RESOLVED]`** confirmation messages upon incident mitigation.
+* Configured **Alertmanager** with custom routing rules and a native `discord_configs` receiver (supported directly since Alertmanager v0.25) to push alert notifications straight to a dedicated Discord channel (`#sre-alerts`).
+* Validated full end-to-end alerting lifecycle by triggering a real alert through the Alertmanager API and confirming delivery in Discord within seconds — including live `[FIRING]` notifications for both custom SRE rules and the operator's own built-in meta-alerts (`Watchdog`, `AlertmanagerFailedToSendAlerts`).
 
 ### 4. GitOps-Compliant Sealed Alertmanager Credentials
 
-* The Discord Webhook URL is fully protected against leaks.
-* Fetched the controller's public TLS certificate from `kube-system` and encrypted `alertmanager-config.yaml` using `kubeseal` into `monitoring/sealedsecret-alertmanager.yaml`.
-* The encrypted secret is committed safely to Git, and automatically decrypted in-cluster into `alertmanager-config` for Alertmanager to consume.
+* Encrypted the full `alertmanager.yaml` (including the Discord webhook URL) client-side using `kubeseal` into `monitoring/manifests/sealedsecret-alertmanager.yaml`.
+* The encrypted secret is committed safely to Git, and automatically decrypted in-cluster into the `alertmanager-config` Secret for Alertmanager to consume — applied automatically via a dedicated ArgoCD manifest source (`monitoring/manifests/`), not a one-off manual `kubectl apply`.
+
+> **Incident note:** during initial setup, a webhook URL was briefly committed in plaintext before the SealedSecret was in place. It was rotated (old webhook revoked, new one generated) and the plaintext file was removed from the repository as soon as it was caught. Documented here deliberately — catching and correctly remediating a credential leak is itself a real SRE skill.
 
 ---
 
@@ -235,9 +235,10 @@ cloud-native-sre-platform/
 │       ├── Chart.yaml
 │       └── values.yaml
 ├── monitoring/
-│   ├── alertmanager-config.yaml       # Raw Alertmanager routing & receivers
-│   ├── sealedsecret-alertmanager.yaml # Encrypted Discord Webhook config
-│   └── values-override.yaml           # kube-prometheus-stack Helm overrides
+│   ├── manifests/
+│   │   └── sealedsecret-alertmanager.yaml  # Encrypted Discord webhook config
+│   │                                        # (own ArgoCD source, auto-applied)
+│   └── values-override.yaml                # kube-prometheus-stack Helm overrides
 ├── kind-config.yaml
 └── README.md
 
