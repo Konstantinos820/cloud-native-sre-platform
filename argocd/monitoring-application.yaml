@@ -28,6 +28,13 @@ spec:
       targetRevision: main
       ref: values
 
+    # Plain-manifest source: applies everything under monitoring/manifests/
+    # (currently just the SealedSecret for the Alertmanager Discord webhook)
+    # on every sync, so this never again requires a manual `kubectl apply`.
+    - repoURL: https://github.com/Konstantinos820/cloud-native-sre-platform.git
+      targetRevision: main
+      path: monitoring/manifests
+
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring

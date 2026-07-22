@@ -65,12 +65,6 @@ postgres:
 
   containerPort: 5432
 
-    # NOTE: plaintext placeholder for Week 2 only (local-only Kind cluster).
-    # Replaced by Bitnami Sealed Secrets in Week 3.
-    # This file is excluded from Trivy secret-scanning via --skip-files in ci.yml
-    # (Trivy's inline `trivy:ignore` comments don't apply to secret scanning or Helm files).
-  
-
   persistence:
     size: 1Gi
     # Kind's built-in default StorageClass (local-path-provisioner) is
