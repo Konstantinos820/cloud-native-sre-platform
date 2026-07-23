@@ -2,15 +2,16 @@
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: {{ include "sre-platform-app.fullname" . }}-fastapi
+  name: {{ .Release.Name }}-fastapi-hpa
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "sre-platform-app.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: {{ include "sre-platform-app.fullname" . }}-fastapi
+    name: {{ .Release.Name }}-fastapi
   minReplicas: {{ .Values.app.autoscaling.minReplicas }}
   maxReplicas: {{ .Values.app.autoscaling.maxReplicas }}
   metrics:
