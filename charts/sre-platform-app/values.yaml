@@ -28,6 +28,12 @@ app:
       cpu: 200m
       memory: 256Mi
 
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 50
+
   # Rolling update strategy: never drop below full capacity (maxUnavailable: 0),
   # allow one extra pod during the rollout (maxSurge: 25%) so new pods pass
   # their readiness probe before old ones are terminated -> zero downtime.
