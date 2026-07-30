@@ -3,3 +3,6 @@ __pycache__/
 .venv/
 .env
 .ruff_cache/
+image*.tar
+packages.json
+trivy-report.json

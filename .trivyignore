@@ -1,0 +1,14 @@
+# False positives confirmed via manual investigation (see README, Milestone 1
+# security notes). Trivy's "sbom" analyzer duplicate-detects a stale package
+# record for these two libraries alongside the real, correctly-patched
+# filesystem package (confirmed via "python-pkg" analyzer + FilePath pointing
+# at the actual dist-info METADATA). Source of the stale "sbom" record is
+# unidentified (same image layer, no FilePath) -- likely related to
+# https://github.com/aquasecurity/trivy/discussions/10093 (PEP 770 SBOM
+# duplicate-detection), not yet fully covering this case in the Trivy version
+# used here.
+#
+# msgpack: real installed version confirmed 1.2.1 (fixed); stale sbom record says 1.1.2
+GHSA-6v7p-g79w-8964
+# setuptools: real installed version confirmed 83.0.0 (fixed); stale sbom record says 70.3.0
+CVE-2025-47273
