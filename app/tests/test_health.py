@@ -1,7 +1,7 @@
-from fastapi.testclient import TestClient
-from _pytest.monkeypatch import MonkeyPatch
-from httpx import Response
 import src.main as main_module
+from _pytest.monkeypatch import MonkeyPatch
+from fastapi.testclient import TestClient
+from httpx import Response
 
 
 def test_health_live_does_not_touch_db(client: TestClient) -> None:

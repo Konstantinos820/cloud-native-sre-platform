@@ -4,12 +4,12 @@ and a lightweight health-check helper used by the /health/ready probe.
 """
 
 import logging
-from datetime import datetime, timezone
 from contextlib import contextmanager
+from datetime import datetime, timezone
 
-from sqlalchemy import create_engine, text, Column, Integer, String, DateTime
-from sqlalchemy.orm import sessionmaker, declarative_base, Session
+from sqlalchemy import Column, DateTime, Integer, String, create_engine, text
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
+from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 from src.config import settings
 
