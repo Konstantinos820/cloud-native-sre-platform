@@ -62,7 +62,7 @@ app:
     appVersion: "0.1.0"
     dbPoolSize: "10"
     dbMaxOverflow: "10"
-    dbPoolTimeout: "10"
+    dbPoolTimeout: "5"        # ήταν "10" - το 10s ήταν αυτό που έκανε τα requests να στοιβάζονται αντί να αποτυγχάνουν γρήγορα
 
 postgres:
   image:

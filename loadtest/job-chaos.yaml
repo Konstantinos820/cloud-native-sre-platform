@@ -1,0 +1,48 @@
+# Lighter-weight companion to job.yaml, purpose-built for the resilience/chaos
+# test: fewer concurrent users than job.yaml (60 vs 150) so the DB bottleneck
+# observed at higher concurrency doesn't confound the result -- this run
+# isolates the effect of a single pod being force-killed mid-test.
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: locust-load-test
+  namespace: sre-platform
+  labels:
+    app.kubernetes.io/name: locust-load-test
+    app.kubernetes.io/part-of: sre-platform
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: locust-load-test
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: locust
+          image: locustio/locust:2.31.6
+          args:
+            - "-f"
+            - "/mnt/locust/locustfile.py"
+            - "--host=http://sre-platform-app-fastapi"
+            - "--headless"
+            - "--users=60"
+            - "--spawn-rate=10"
+            - "--run-time=2m"
+            - "--print-stats"
+          volumeMounts:
+            - name: locustfile
+              mountPath: /mnt/locust
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: locustfile
+          configMap:
+            name: locustfile

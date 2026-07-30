@@ -16,7 +16,7 @@ import time
 from contextlib import asynccontextmanager
 from typing import Callable, Awaitable
 
-from fastapi import FastAPI, Depends, HTTPException, Response, Request
+from fastapi import FastAPI, Depends, HTTPException, Response, Request, Query
 from pydantic import BaseModel, EmailStr, ConfigDict
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy.orm import Session
@@ -180,8 +180,17 @@ def create_user(payload: UserCreate, db: Session = Depends(get_db)):
 
 
 @app.get("/users", response_model=list[UserOut], tags=["users"])
-def list_users(db: Session = Depends(get_db)):
-    return db.query(User).order_by(User.id).all()
+def list_users(
+    skip: int = 0,
+    limit: int = Query(default=20, le=100),
+    db: Session = Depends(get_db),
+):
+    """
+    Paginated user listing. Without a limit this scanned the entire table
+    on every call, getting slower as it grew -- the single worst-performing
+    endpoint during Milestone 5 load testing (63s max response time).
+    """
+    return db.query(User).order_by(User.id).offset(skip).limit(limit).all()
 
 
 @app.get("/users/{user_id}", response_model=UserOut, tags=["users"])

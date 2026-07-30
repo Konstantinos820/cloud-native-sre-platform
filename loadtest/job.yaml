@@ -1,0 +1,43 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: locust-load-test
+  namespace: sre-platform
+  labels:
+    app.kubernetes.io/name: locust-load-test
+    app.kubernetes.io/part-of: sre-platform
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: locust-load-test
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: locust
+          image: locustio/locust:2.31.6
+          args:
+            - "-f"
+            - "/mnt/locust/locustfile.py"
+            - "--host=http://sre-platform-app-fastapi"
+            - "--headless"
+            - "--users=150"
+            - "--spawn-rate=15"
+            - "--run-time=3m"
+            - "--print-stats"
+          volumeMounts:
+            - name: locustfile
+              mountPath: /mnt/locust
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: locustfile
+          configMap:
+            name: locustfile
