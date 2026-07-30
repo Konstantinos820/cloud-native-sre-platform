@@ -42,6 +42,12 @@ spec:
               value: {{ .Values.app.env.appName | quote }}
             - name: APP_VERSION
               value: {{ .Values.app.env.appVersion | quote }}
+            - name: DB_POOL_SIZE
+              value: {{ .Values.app.env.dbPoolSize | quote }}
+            - name: DB_MAX_OVERFLOW
+              value: {{ .Values.app.env.dbMaxOverflow | quote }}
+            - name: DB_POOL_TIMEOUT
+              value: {{ .Values.app.env.dbPoolTimeout | quote }}
             - name: POSTGRES_HOST
               # Must match the StatefulSet's headless Service name.
               value: "{{ .Release.Name }}-postgres-headless"
