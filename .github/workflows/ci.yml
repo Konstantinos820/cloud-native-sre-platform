@@ -76,6 +76,7 @@ jobs:
           file: ./app/Dockerfile
           tags: sre-platform-api:test
           outputs: type=docker,dest=/tmp/image.tar
+          provenance: false
 
       # 1. Native εγκατάσταση του Trivy CLI
       - name: Install Trivy CLI
