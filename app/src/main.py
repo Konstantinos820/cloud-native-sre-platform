@@ -13,20 +13,20 @@ Exposes:
 
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import Callable, Awaitable
 
-from fastapi import FastAPI, Depends, HTTPException, Response, Request, Query
-from pydantic import BaseModel, EmailStr, ConfigDict
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-from sqlalchemy.orm import Session
+from pydantic import BaseModel, ConfigDict, EmailStr
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from src.config import settings
-from src.database import get_db, init_db, check_db_connection, User
+from src.database import User, check_db_connection, get_db, init_db
 from src.metrics import (
-    HTTP_REQUESTS_TOTAL,
     HTTP_REQUEST_DURATION_SECONDS,
+    HTTP_REQUESTS_TOTAL,
     USER_REGISTRATIONS_TOTAL,
 )
 
@@ -166,11 +166,11 @@ def create_user(payload: UserCreate, db: Session = Depends(get_db)):
     db.add(user)
     try:
         db.commit()
-    except IntegrityError:
+    except IntegrityError as err:
         db.rollback()
         raise HTTPException(
             status_code=409, detail="A user with this email already exists"
-        )
+        ) from err
     db.refresh(user)
 
     # Business metric: increment only on a successful registration.

@@ -25,7 +25,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r app/requirements.txt
-          pip install black ruff pytest pytest-cov httpx
+          pip install -r app/requirements-dev.txt
 
       - name: Run Black Formatter Check
         run: black --check app/src app/tests
