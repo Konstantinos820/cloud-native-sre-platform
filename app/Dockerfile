@@ -32,6 +32,10 @@ RUN apt-get update && apt-get upgrade -y && \
     groupadd --gid 10001 appgroup && \
     useradd --uid 10001 --gid appgroup --no-create-home --shell /usr/sbin/nologin appuser
 
+# Wipe whatever the base image shipped in /usr/local first -- otherwise
+# COPY only overlays the builder's files, leaving orphaned old versions
+# (e.g. the base image's own pip) sitting alongside the new ones.
+RUN rm -rf /usr/local
 COPY --from=builder /usr/local /usr/local
 COPY src/ /app/src/
 
