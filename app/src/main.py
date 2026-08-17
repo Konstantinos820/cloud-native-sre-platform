@@ -17,6 +17,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor  # type: ignore
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, ConfigDict, EmailStr
 from sqlalchemy.exc import IntegrityError
@@ -29,6 +30,7 @@ from src.metrics import (
     HTTP_REQUESTS_TOTAL,
     USER_REGISTRATIONS_TOTAL,
 )
+from src.tracing import setup_tracing
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
@@ -58,8 +60,14 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down.")
 
 
+# Initialize Tracing Provider
+setup_tracing()
+
 app = FastAPI(title=settings.APP_NAME, version=settings.APP_VERSION, lifespan=lifespan)
 
+# Instrument FastAPI application
+if settings.OTEL_TRACES_ENABLED:
+    FastAPIInstrumentor.instrument_app(app, excluded_urls="health/.*,metrics")
 
 # --- Middleware: HTTP metrics -----------------------------------------------
 

@@ -7,6 +7,9 @@ import logging
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
+from opentelemetry.instrumentation.sqlalchemy import (
+    SQLAlchemyInstrumentor,  # type: ignore
+)
 from sqlalchemy import Column, DateTime, Integer, String, create_engine, text
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
@@ -25,6 +28,10 @@ engine = create_engine(
     pool_timeout=settings.DB_POOL_TIMEOUT,
     future=True,
 )
+
+# Instrument SQLAlchemy engine for OpenTelemetry traces
+if settings.OTEL_TRACES_ENABLED:
+    SQLAlchemyInstrumentor().instrument(engine=engine)
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 

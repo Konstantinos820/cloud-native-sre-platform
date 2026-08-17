@@ -6,3 +6,8 @@ __pycache__/
 image*.tar
 packages.json
 trivy-report.json
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/

@@ -68,7 +68,12 @@ spec:
                 secretKeyRef:
                   name: {{ .Release.Name }}-postgres-credentials
                   key: POSTGRES_DB
-
+            - name: OTEL_TRACES_ENABLED
+              value: "true"
+            - name: OTEL_SERVICE_NAME
+              value: {{ .Values.app.env.appName | quote }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.monitoring.svc.cluster.local:4317"
           resources:
             requests:
               cpu: {{ .Values.app.resources.requests.cpu }}

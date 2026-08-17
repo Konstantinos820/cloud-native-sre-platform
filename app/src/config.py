@@ -32,5 +32,14 @@ class Settings:
     DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "5"))
     DB_POOL_TIMEOUT: int = int(os.getenv("DB_POOL_TIMEOUT", "5"))
 
+    # OpenTelemetry Tracing Configurations
+    OTEL_TRACES_ENABLED: bool = (
+        os.getenv("OTEL_TRACES_ENABLED", "true").lower() == "true"
+    )
+    OTEL_SERVICE_NAME: str = os.getenv("OTEL_SERVICE_NAME", "sre-platform-api")
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = os.getenv(
+        "OTEL_EXPORTER_OTLP_ENDPOINT", "http://tempo.monitoring.svc.cluster.local:4317"
+    )
+
 
 settings = Settings()
