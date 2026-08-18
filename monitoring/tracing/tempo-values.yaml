@@ -36,7 +36,6 @@ tempoQuery:
 
 persistence:
   enabled: true
-  storageClassName: local-path
   accessModes:
     - ReadWriteOnce
   size: 5Gi
