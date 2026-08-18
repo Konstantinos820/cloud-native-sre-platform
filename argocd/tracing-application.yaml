@@ -1,0 +1,60 @@
+# argocd/tracing-application.yaml
+#
+# GitOps-managed distributed tracing stack:
+# OpenTelemetry Collector receives application traces over OTLP
+# and forwards them to Grafana Tempo for storage/querying.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tracing-stack
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+
+spec:
+  project: default
+
+  sources:
+    # Grafana Tempo - single-binary trace backend for the local Kind cluster.
+    - repoURL: https://grafana-community.github.io/helm-charts
+      chart: tempo
+      targetRevision: 2.2.4
+      helm:
+        releaseName: tempo
+        valueFiles:
+          - $values/monitoring/tracing/tempo-values.yaml
+
+    # OpenTelemetry Collector - receives application OTLP traces
+    # and forwards them to Tempo.
+    - repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
+      chart: opentelemetry-collector
+      targetRevision: 0.170.0
+      helm:
+        releaseName: otel-collector
+        valueFiles:
+          - $values/monitoring/tracing/otel-collector-values.yaml
+
+    # This repository supplies the Helm values files above.
+    - repoURL: https://github.com/Konstantinos820/cloud-native-sre-platform.git
+      targetRevision: main
+      ref: values
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+
+    syncOptions:
+      - CreateNamespace=true
+
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
