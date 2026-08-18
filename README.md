@@ -12,47 +12,96 @@ The project is intentionally built incrementally, with every milestone introduci
 
 ```mermaid
 graph LR
-    subgraph CI [CI / CD & Registry]
+    %% =========================================================
+    %% CI
+    %% =========================================================
+    subgraph CI [CI Pipeline]
         Dev[Developer / Git Push] -->|Triggers| GHA[GitHub Actions CI]
-        GHA -->|Code Quality & Tests| Quality[Quality Gates]
-        GHA -->|Security Scan| Trivy[Trivy]
-        GHA -->|Build & Push| Registry[(Container Registry)]
+
+        GHA -->|Linting & Tests| Quality[Quality Gates]
+        GHA -->|Security Scanning| Trivy[Trivy]
+        GHA -->|Build Validation| DockerBuild[Docker Image Build]
     end
 
+    %% =========================================================
+    %% External Git Repository
+    %% =========================================================
+    GitRepo[GitHub Repository]
+
+    %% =========================================================
+    %% Kubernetes Cluster
+    %% =========================================================
     subgraph Cluster [Kind Kubernetes Cluster]
 
-        ArgoCD[ArgoCD Sync Engine] -->|Watches Git| GitRepo[GitHub Repository]
+        %% -----------------------------------------------------
+        %% GitOps
+        %% -----------------------------------------------------
+        ArgoCD[ArgoCD Sync Engine]
+        ArgoCD -->|Pulls Desired State| GitRepo
 
+        %% -----------------------------------------------------
+        %% Application Namespace
+        %% -----------------------------------------------------
         subgraph SRE_NS [sre-platform Namespace]
+
             FastAPI[FastAPI Pods x2-5]
             Postgres[(PostgreSQL StatefulSet)]
 
-            FastAPI <-->|NetworkPolicy| Postgres
+            HPA[HorizontalPodAutoscaler]
+            ServiceMonitor[ServiceMonitor]
 
-            HPA[HorizontalPodAutoscaler] -->|Scales| FastAPI
-            ServiceMonitor[ServiceMonitor] -->|Discovers| FastAPI
+            HPA -->|Scales| FastAPI
+            FastAPI -->|TCP 5432 allowed by NetworkPolicy| Postgres
         end
 
+        %% -----------------------------------------------------
+        %% Cluster-level Components
+        %% -----------------------------------------------------
         MetricsServer[metrics-server] -->|CPU / Memory Metrics| HPA
 
+        %% -----------------------------------------------------
+        %% Monitoring Namespace
+        %% -----------------------------------------------------
         subgraph Mon_NS [monitoring Namespace]
-            Prometheus[Prometheus Operator]
-            Grafana[Grafana]
+
+            PromOperator[Prometheus Operator]
+            Prometheus[Prometheus Server]
+            Rules[Prometheus Rules]
             Alertmanager[Alertmanager]
-            Tempo[Tempo / OTLP]
 
-            Prometheus -->|Scrapes| ServiceMonitor
-            Prometheus -->|Evaluates| Rules[Prometheus Rules]
-            Rules -->|Alerts| Alertmanager
+            OTelCollector[OpenTelemetry Collector]
+            Tempo[Tempo]
+            Grafana[Grafana]
 
-            FastAPI -->|OTLP gRPC| Tempo
+            PromOperator -->|Manages| Prometheus
+
+            ServiceMonitor -->|Defines Scrape Targets| Prometheus
+            Prometheus -->|Scrapes /metrics| FastAPI
+
+            Prometheus -->|Evaluates| Rules
+            Rules -->|Fires Alerts| Alertmanager
+
+            Grafana -->|Queries Metrics| Prometheus
+
+            FastAPI -->|OTLP gRPC| OTelCollector
+            OTelCollector -->|OTLP gRPC| Tempo
+            Grafana -->|Queries Traces| Tempo
         end
+
+        %% -----------------------------------------------------
+        %% GitOps Reconciliation
+        %% -----------------------------------------------------
+        ArgoCD -->|Reconciles Application Resources| FastAPI
+        ArgoCD -->|Reconciles Database Resources| Postgres
+        ArgoCD -->|Reconciles Monitoring Resources| PromOperator
+        ArgoCD -->|Reconciles Tracing Resources| OTelCollector
     end
 
+    %% =========================================================
+    %% External Notifications
+    %% =========================================================
     Alertmanager -->|Notifications| Discord[Discord #sre-alerts]
-
-    Registry -->|Image Pull| FastAPI
-````
+```
 
 ---
 
@@ -65,7 +114,7 @@ The platform is being implemented through seven progressive SRE milestones:
 * **3: GitOps Continuous Delivery with ArgoCD & Sealed Secrets** 🟢 **Completed**
 * **4: Observability & Production-Grade Alerting** 🟢 **Completed**
 * **5: Autoscaling & Load Testing** 🟢 **Completed**
-* **6: Distributed Tracing & Chaos Engineering** 🟡 **In Progress**
+* **6: Distributed Tracing & Chaos Engineering** 🟢 **Completed**
 * **7: Infrastructure as Code with Terraform** ⏳ **Planned**
 
 ---
@@ -106,8 +155,9 @@ The platform is being implemented through seven progressive SRE milestones:
 * kube-state-metrics
 * prometheus_client
 * OpenTelemetry
-* OTLP
-* Tempo / Jaeger-compatible tracing architecture
+* OpenTelemetry Collector
+* OTLP/gRPC
+* Tempo
 
 ### Testing & Load Engineering
 
@@ -470,71 +520,122 @@ This validated the platform's basic Kubernetes self-healing behavior.
 
 ---
 
-# 🟡 Milestone 6: Distributed Tracing & Chaos Engineering
+# 🟢 Milestone 6: Distributed Tracing & Chaos Engineering
 
-This is the **current milestone**.
+The sixth phase extends platform observability from metrics and alerting into distributed tracing and validates platform behavior under controlled dependency degradation and outages.
 
-The goal is to extend observability from metrics into distributed request tracing and to move from a single manual pod-kill test toward reproducible chaos scenarios.
+The milestone combines:
+
+* OpenTelemetry application instrumentation
+* OpenTelemetry Collector
+* Tempo
+* Grafana trace visualization
+* SQLAlchemy database tracing
+* Controlled network fault injection
+* Kubernetes readiness validation
+* Automated recovery verification
 
 ---
 
 ## 1. OpenTelemetry Application Instrumentation
 
-OpenTelemetry tracing has now been integrated into the FastAPI application.
-
-The application includes:
+The FastAPI application is instrumented using:
 
 * OpenTelemetry API
 * OpenTelemetry SDK
-* OTLP gRPC exporter
 * FastAPI instrumentation
 * SQLAlchemy instrumentation
+* OTLP/gRPC exporter
 
-The intended request flow is:
-
-```text
-Client
-  ↓
-FastAPI
-  ↓
-SQLAlchemy
-  ↓
-PostgreSQL
-```
-
-with tracing information propagated through the application and database layers.
-
-## 2. Configurable Tracing
-
-Tracing can be enabled or disabled using environment variables.
-
-Example:
+Tracing is configurable through environment variables:
 
 ```text
 OTEL_TRACES_ENABLED=true
 OTEL_SERVICE_NAME=sre-platform-api
-OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo.monitoring.svc.cluster.local:4317
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.monitoring.svc.cluster.local:4317
 ```
 
-Tracing is therefore controlled through deployment configuration rather than hardcoded application behavior.
+Health-check and metrics endpoints are excluded from automatic FastAPI tracing to reduce unnecessary telemetry noise.
 
-## 3. Application Test Coverage
+---
 
-The application unit-test suite was expanded to cover:
+## 2. Distributed Tracing Architecture
 
-* Database success paths
-* Database failure paths
-* OpenTelemetry configuration
-* SQLAlchemy instrumentation
-* FastAPI instrumentation
-* Application startup failure
-* Application startup success
-* User endpoint edge cases
-* Root endpoint
-* Existing health endpoints
-* Existing user CRUD behavior
+The final tracing pipeline is:
 
-Current result:
+```text
+HTTP Request
+    ↓
+FastAPI
+    ↓
+SQLAlchemy
+    ↓
+PostgreSQL
+
+FastAPI / SQLAlchemy spans
+    ↓
+OTLP/gRPC
+    ↓
+OpenTelemetry Collector
+    ↓
+Tempo
+    ↓
+Grafana
+```
+
+Tempo runs inside the `monitoring` namespace with persistent local storage.
+
+The OpenTelemetry Collector acts as the telemetry ingestion layer between the application and tracing backend.
+
+---
+
+## 3. End-to-End Trace Validation
+
+Real application traffic was generated against the Kubernetes deployment and inspected through Grafana / Tempo.
+
+A normal `GET /users` request produced a complete trace containing:
+
+```text
+GET /users                 FastAPI SERVER span
+│
+├── connect                SQLAlchemy CLIENT span
+├── SELECT app_db          SQLAlchemy CLIENT span
+├── http send
+├── http send
+└── http send
+```
+
+The database spans contained PostgreSQL attributes including:
+
+```text
+db.system = postgresql
+db.name   = app_db
+db.user   = app_user
+```
+
+and referenced the PostgreSQL Kubernetes service on port `5432`.
+
+Parent-child relationships between the FastAPI server span and SQLAlchemy database spans were verified from real Tempo trace data.
+
+This confirmed the complete path:
+
+```text
+Application
+    ↓
+Instrumentation
+    ↓
+Collector
+    ↓
+Tempo
+    ↓
+Grafana
+```
+
+---
+
+## 4. Application Test Coverage
+
+The application test suite currently reports:
 
 ```text
 18 tests passed
@@ -543,7 +644,7 @@ Current result:
 100% statement coverage
 ```
 
-Coverage currently reaches:
+Coverage includes:
 
 ```text
 src/config.py       100%
@@ -554,57 +655,233 @@ src/tracing.py      100%
 TOTAL               100%
 ```
 
-> **Important distinction:** 100% statement coverage proves the application code paths are exercised by tests. It does not yet prove that traces are successfully exported and visualized end-to-end inside the Kubernetes cluster.
+> **Important distinction:** 100% statement coverage demonstrates that the instrumented application code paths are exercised by tests. End-to-end tracing was validated separately against the running Kubernetes environment.
 
-## 4. Remaining Distributed Tracing Work
+---
 
-The remaining tracing work is cluster-level validation.
+## 5. Chaos Engineering Strategy
 
-The next objective is to verify an actual trace lifecycle:
-
-```text
-HTTP Request
-    ↓
-FastAPI span
-    ↓
-SQLAlchemy span
-    ↓
-PostgreSQL query
-    ↓
-OTLP
-    ↓
-Tempo / Jaeger-compatible backend
-    ↓
-Grafana / tracing UI
-```
-
-A successful end-to-end trace must be observed from an actual request running inside Kubernetes.
-
-## 5. Remaining Chaos Engineering Work
-
-The manual pod-kill test from Milestone 5 already demonstrated Kubernetes self-healing.
-
-Milestone 6 will extend this into reproducible chaos scenarios such as:
-
-* Network latency injection
-* PostgreSQL dependency failure
-* Database connectivity disruption
-* Service degradation
-* Timeout and recovery behavior
-
-The objective is not simply to break the system, but to verify:
+Chaos experiments are implemented as reproducible PowerShell scripts under:
 
 ```text
-Failure
-   ↓
-Detection
-   ↓
-Degradation / Isolation
-   ↓
-Recovery
-   ↓
-Observable Evidence
+chaos/
+├── postgres-latency.ps1
+├── postgres-outage.ps1
+└── README.md
 ```
+
+Because the local Kind cluster runs a Kubernetes version newer than the officially supported Chaos Mesh compatibility range evaluated during this milestone, fault injection was implemented directly using Linux networking primitives inside the PostgreSQL network namespace.
+
+The experiments use:
+
+```text
+tc / netem
+iptables
+nsenter
+```
+
+Runtime identifiers such as container IDs, process IDs, network interfaces, and FastAPI pod IP addresses are dynamically discovered rather than hardcoded.
+
+Both experiments implement automatic cleanup safeguards.
+
+---
+
+## 6. Chaos Experiment — PostgreSQL Network Latency
+
+### Hypothesis
+
+Adding PostgreSQL network latency should increase database-backed request latency while allowing requests to remain successful.
+
+After fault removal, latency should return close to baseline without restarting the application.
+
+### Fault
+
+```text
+tc netem delay 300ms
+```
+
+### Baseline
+
+```text
+Requests: 5/5 successful
+Average: 8.67 ms
+Median:  8.57 ms
+```
+
+### During Fault
+
+```text
+Requests: 5/5 successful
+Average: 910.47 ms
+Median:  910.30 ms
+```
+
+This produced approximately a **105x increase in observed request latency**.
+
+Grafana / Tempo trace inspection showed the PostgreSQL operations becoming the dominant request cost.
+
+One manually inspected degraded trace showed approximately:
+
+```text
+GET /users                 ~2.17 s
+├── connect                ~1.55 s
+└── SELECT app_db          ~609 ms
+```
+
+### Recovery
+
+After automatic cleanup:
+
+```text
+Requests: 5/5 successful
+Average: 8.64 ms
+Median:  8.53 ms
+```
+
+The PostgreSQL network interface returned to its normal:
+
+```text
+qdisc noqueue
+```
+
+state.
+
+---
+
+## 7. Chaos Experiment — PostgreSQL Dependency Outage
+
+### Hypothesis
+
+If PostgreSQL becomes unreachable:
+
+```text
+Database requests should fail
+        ↓
+Readiness should detect the dependency failure
+        ↓
+FastAPI replicas should become NotReady
+        ↓
+Application processes should remain alive
+        ↓
+Removing the fault should restore service automatically
+```
+
+### Fault
+
+The experiment dynamically discovers the active FastAPI pod IP addresses and inserts PostgreSQL-side rules equivalent to:
+
+```text
+REJECT FastAPI Pod A → PostgreSQL TCP/5432
+REJECT FastAPI Pod B → PostgreSQL TCP/5432
+```
+
+### Observed Failure
+
+```text
+Requests during outage: 5/5 failed
+Ready FastAPI replicas: 0
+FastAPI container restarts: 0
+PostgreSQL: 1/1 Running
+```
+
+The first failing application request returned:
+
+```text
+HTTP 500
+```
+
+Grafana / Tempo captured the corresponding trace.
+
+The PostgreSQL connection span showed:
+
+```text
+Kind: client
+Status: error
+
+db.system = postgresql
+db.name   = app_db
+db.user   = app_user
+
+net.peer.name = sre-platform-app-postgres-headless
+net.peer.port = 5432
+```
+
+The recorded exception was:
+
+```text
+sqlalchemy.exc.OperationalError
+psycopg2.OperationalError
+connection refused
+```
+
+No SQL `SELECT` span was generated because the connection failed before the query could execute.
+
+This provided the complete observable failure chain:
+
+```text
+Controlled Network Fault
+        ↓
+PostgreSQL Connection Refused
+        ↓
+SQLAlchemy OperationalError
+        ↓
+GET /users HTTP 500
+        ↓
+Readiness Failure
+        ↓
+FastAPI Replicas NotReady
+```
+
+---
+
+## 8. Automatic Recovery Validation
+
+All injected `iptables` rules were removed automatically through cleanup logic.
+
+Kubernetes subsequently reported:
+
+```text
+Ready FastAPI replicas: 2
+```
+
+Recovery was validated from inside the Kubernetes cluster through the FastAPI Service:
+
+```text
+Recovery requests: 5/5 successful
+FastAPI replicas:  1/1 + 1/1
+PostgreSQL:        1/1
+FastAPI restarts:  0
+```
+
+The final PostgreSQL INPUT chain contained no injected `REJECT` rules.
+
+The application therefore recovered from the complete database dependency disruption without requiring a FastAPI pod restart.
+
+---
+
+## 9. What Milestone 6 Validated
+
+The distributed tracing and chaos engineering phase demonstrated:
+
+```text
+Normal Request
+      ↓
+Distributed Trace
+      ↓
+Controlled Fault
+      ↓
+Observable Degradation / Failure
+      ↓
+Kubernetes Readiness Reaction
+      ↓
+Automatic Fault Cleanup
+      ↓
+Service Recovery
+      ↓
+Post-Recovery Validation
+```
+
+The platform now provides trace-level visibility into application and database behavior and has reproducible resilience experiments for both dependency degradation and complete dependency loss.
 
 ---
 
@@ -758,6 +1035,11 @@ cloud-native-sre-platform/
 │
 ├── monitoring/
 │
+├── chaos/
+│   ├── README.md
+│   ├── postgres-latency.ps1
+│   └── postgres-outage.ps1
+│
 ├── loadtest/
 │
 ├── locustfile.py
@@ -771,7 +1053,7 @@ cloud-native-sre-platform/
 
 # 🚀 Current Status
 
-The platform has completed the first five major SRE milestones and the application testing foundation for Milestone 6.
+The platform has completed the first six SRE milestones.
 
 ### Completed
 
@@ -794,30 +1076,24 @@ The platform has completed the first five major SRE milestones and the applicati
 * HPA autoscaling
 * In-cluster Locust load testing
 * Performance root-cause investigation
-* Kubernetes self-healing / pod-kill resilience test
+* Kubernetes self-healing / pod-kill resilience testing
 * OpenTelemetry application instrumentation
-* SQLAlchemy tracing instrumentation
-* FastAPI tracing instrumentation
+* OpenTelemetry Collector
+* SQLAlchemy distributed tracing
+* Tempo trace storage
+* Grafana trace visualization
+* End-to-end FastAPI → PostgreSQL trace validation
+* Reproducible PostgreSQL latency chaos experiment
+* Reproducible PostgreSQL dependency outage experiment
+* Automated chaos cleanup and recovery validation
 * **100% statement coverage**
 * **18/18 unit tests passing**
 
 ### Current Work
 
-**Milestone 6 — Distributed Tracing & Chaos Engineering**
+**Milestone 7 — Infrastructure as Code with Terraform**
 
-Current focus:
-
-1. Deploy / validate the OpenTelemetry tracing backend inside Kubernetes.
-2. Verify real end-to-end traces from FastAPI → SQLAlchemy → PostgreSQL.
-3. Visualize traces through the tracing UI.
-4. Implement reproducible chaos scenarios.
-5. Validate failure detection, isolation, recovery, and observability.
-
-### Next
-
-**Milestone 7 — Terraform Infrastructure as Code**
-
-Terraform-based cloud infrastructure provisioning and CI validation.
+The final milestone will introduce reproducible cloud infrastructure provisioning and infrastructure-focused CI validation.
 
 ---
 
