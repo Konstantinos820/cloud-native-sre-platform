@@ -1,0 +1,35 @@
+subscription_id = "00000000-0000-0000-0000-000000000000"
+
+project_name = "sre-platform"
+environment  = "dev"
+location     = "westeurope"
+
+vnet_address_space                = ["10.20.0.0/16"]
+aks_subnet_prefixes               = ["10.20.0.0/23"]
+postgresql_subnet_prefixes        = ["10.20.2.0/24"]
+private_endpoints_subnet_prefixes = ["10.20.3.0/24"]
+
+aks_kubernetes_version    = null
+aks_sku_tier              = "Free"
+aks_system_node_vm_size   = "Standard_D2s_v5"
+aks_system_node_min_count = 2
+aks_system_node_max_count = 5
+
+aks_pod_cidr       = "10.244.0.0/16"
+aks_service_cidr   = "10.0.0.0/16"
+aks_dns_service_ip = "10.0.0.10"
+
+# Replace with real Microsoft Entra group object IDs before deployment.
+aks_admin_group_object_ids = []
+
+postgresql_administrator_login            = "appadmin"
+postgresql_administrator_password_version = 1
+postgresql_version                        = "16"
+postgresql_sku_name                       = "B_Standard_B1ms"
+postgresql_storage_mb                     = 32768
+postgresql_backup_retention_days          = 7
+postgresql_database_name                  = "app_db"
+
+# Do not store the administrator password in this file.
+# Supply it securely at runtime using:
+# TF_VAR_postgresql_administrator_password
