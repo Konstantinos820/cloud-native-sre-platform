@@ -43,7 +43,7 @@ variable "sku_tier" {
 variable "system_node_vm_size" {
   description = "VM size used by the AKS system node pool."
   type        = string
-  default     = "Standard_D2s_v5"
+  default     = "Standard_D4ds_v5"
 }
 
 variable "system_node_min_count" {
@@ -86,4 +86,54 @@ variable "tags" {
   description = "Tags applied to AKS resources."
   type        = map(string)
   default     = {}
+}
+
+variable "max_pods_per_node" {
+  description = "Maximum number of Kubernetes pods scheduled per AKS node."
+  type        = number
+  default     = 110
+
+  validation {
+    condition     = var.max_pods_per_node >= 50 && var.max_pods_per_node <= 250
+    error_message = "max_pods_per_node must be between 50 and 250."
+  }
+}
+
+variable "user_node_vm_size" {
+  description = "VM size used by the AKS application user node pool."
+  type        = string
+  default     = "Standard_D2ds_v5"
+}
+
+variable "user_node_min_count" {
+  description = "Minimum number of nodes in the AKS application user node pool."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.user_node_min_count >= 1
+    error_message = "user_node_min_count must be at least 1."
+  }
+}
+
+variable "user_node_max_count" {
+  description = "Maximum number of nodes in the AKS application user node pool."
+  type        = number
+  default     = 3
+
+  validation {
+    condition     = var.user_node_max_count >= var.user_node_min_count
+    error_message = "user_node_max_count must be greater than or equal to user_node_min_count."
+  }
+}
+
+variable "node_os_disk_size_gb" {
+  description = "OS disk size used by AKS system and user node pools."
+  type        = number
+  default     = 60
+
+  validation {
+    condition     = var.node_os_disk_size_gb >= 30
+    error_message = "node_os_disk_size_gb must be at least 30 GB."
+  }
 }

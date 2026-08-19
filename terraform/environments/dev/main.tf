@@ -49,6 +49,14 @@ module "aks" {
   system_node_min_count = var.aks_system_node_min_count
   system_node_max_count = var.aks_system_node_max_count
 
+  max_pods_per_node = var.aks_max_pods_per_node
+
+  node_os_disk_size_gb = var.aks_node_os_disk_size_gb
+
+  user_node_vm_size   = var.aks_user_node_vm_size
+  user_node_min_count = var.aks_user_node_min_count
+  user_node_max_count = var.aks_user_node_max_count
+
   pod_cidr       = var.aks_pod_cidr
   service_cidr   = var.aks_service_cidr
   dns_service_ip = var.aks_dns_service_ip
@@ -77,6 +85,22 @@ module "postgresql" {
   storage_mb            = var.postgresql_storage_mb
   backup_retention_days = var.postgresql_backup_retention_days
   database_name         = var.postgresql_database_name
+
+  tags = local.common_tags
+}
+
+module "storage" {
+  source = "../../modules/storage"
+
+  name_prefix         = local.name_prefix
+  resource_group_name = azurerm_resource_group.this.name
+  location            = azurerm_resource_group.this.location
+
+  private_endpoint_subnet_id = module.networking.private_endpoints_subnet_id
+  virtual_network_id         = module.networking.virtual_network_id
+
+  container_name   = var.storage_container_name
+  replication_type = var.storage_replication_type
 
   tags = local.common_tags
 }

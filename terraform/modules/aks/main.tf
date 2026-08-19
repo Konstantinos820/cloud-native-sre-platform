@@ -15,6 +15,11 @@ resource "azurerm_role_assignment" "network_contributor" {
 }
 
 resource "azurerm_kubernetes_cluster" "this" {
+  #checkov:skip=CKV_AZURE_227:Host encryption is production hardening and is intentionally not enabled in the dev baseline.
+  #checkov:skip=CKV_AZURE_170:The dev environment intentionally uses the Free AKS control-plane tier; paid SLA is a production deployment decision.
+  #checkov:skip=CKV_AZURE_4:Cluster observability is provided by the existing Prometheus/Grafana stack; Azure Monitor integration is not part of this dev baseline.
+  #checkov:skip=CKV_AZURE_117:Customer-managed disk encryption requires additional key-management infrastructure and is treated as production compliance hardening.
+
   name                = "${var.name_prefix}-aks"
   location            = var.location
   resource_group_name = var.resource_group_name
@@ -35,8 +40,12 @@ resource "azurerm_kubernetes_cluster" "this" {
 
   oidc_issuer_enabled       = true
   workload_identity_enabled = true
+  azure_policy_enabled      = true
 
-  azure_policy_enabled = true
+  key_vault_secrets_provider {
+    secret_rotation_enabled  = true
+    secret_rotation_interval = "2m"
+  }
 
   automatic_upgrade_channel = "patch"
   node_os_upgrade_channel   = "NodeImage"
@@ -46,15 +55,20 @@ resource "azurerm_kubernetes_cluster" "this" {
   }
 
   default_node_pool {
-    name                   = "system"
-    vm_size                = var.system_node_vm_size
-    vnet_subnet_id         = var.aks_subnet_id
-    type                   = "VirtualMachineScaleSets"
-    auto_scaling_enabled   = true
-    node_count             = var.system_node_min_count
-    min_count              = var.system_node_min_count
-    max_count              = var.system_node_max_count
-    node_public_ip_enabled = false
+    name                         = "system"
+    vm_size                      = var.system_node_vm_size
+    vnet_subnet_id               = var.aks_subnet_id
+    type                         = "VirtualMachineScaleSets"
+    auto_scaling_enabled         = true
+    node_count                   = var.system_node_min_count
+    min_count                    = var.system_node_min_count
+    max_count                    = var.system_node_max_count
+    node_public_ip_enabled       = false
+    max_pods                     = var.max_pods_per_node
+    only_critical_addons_enabled = true
+    temporary_name_for_rotation  = "systemtmp"
+    os_disk_type                 = "Ephemeral"
+    os_disk_size_gb              = var.node_os_disk_size_gb
 
     upgrade_settings {
       max_surge = "33%"
@@ -99,4 +113,33 @@ resource "azurerm_role_assignment" "acr_pull" {
   principal_id         = azurerm_kubernetes_cluster.this.kubelet_identity[0].object_id
 
   skip_service_principal_aad_check = true
+}
+
+resource "azurerm_kubernetes_cluster_node_pool" "user" {
+  #checkov:skip=CKV_AZURE_227:Host encryption is production hardening and is intentionally not enabled for the dev user node pool.
+
+  name                  = "user"
+  kubernetes_cluster_id = azurerm_kubernetes_cluster.this.id
+  vm_size               = var.user_node_vm_size
+  vnet_subnet_id        = var.aks_subnet_id
+  mode                  = "User"
+
+  auto_scaling_enabled = true
+  node_count           = var.user_node_min_count
+  min_count            = var.user_node_min_count
+  max_count            = var.user_node_max_count
+
+  max_pods               = var.max_pods_per_node
+  node_public_ip_enabled = false
+
+  temporary_name_for_rotation = "usertmp"
+
+  os_disk_type    = "Ephemeral"
+  os_disk_size_gb = var.node_os_disk_size_gb
+
+  upgrade_settings {
+    max_surge = "33%"
+  }
+
+  tags = var.tags
 }

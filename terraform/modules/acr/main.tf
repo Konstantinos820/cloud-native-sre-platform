@@ -9,6 +9,10 @@ locals {
 }
 
 resource "azurerm_container_registry" "this" {
+  #checkov:skip=CKV_AZURE_166:ACR quarantine remains a preview feature and is not part of the baseline registry design.
+  #checkov:skip=CKV_AZURE_233:Azure zone redundancy is automatic in supported regions and the legacy property no longer controls behavior.
+  #checkov:skip=CKV_AZURE_165:This dev environment is intentionally single-region; geo-replication is production DR hardening.
+  #checkov:skip=CKV_AZURE_164:Docker Content Trust is deprecated in Azure Container Registry; modern signing should use Notary Project.
   name                = local.registry_name
   resource_group_name = var.resource_group_name
   location            = var.location
@@ -16,6 +20,9 @@ resource "azurerm_container_registry" "this" {
   sku                           = "Premium"
   admin_enabled                 = false
   public_network_access_enabled = false
+  data_endpoint_enabled         = true
+
+  retention_policy_in_days = 30
 
   tags = var.tags
 }

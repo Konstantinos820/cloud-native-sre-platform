@@ -25,6 +25,9 @@ resource "azurerm_private_dns_zone_virtual_network_link" "postgresql" {
 }
 
 resource "azurerm_postgresql_flexible_server" "this" {
+  #checkov:skip=CKV_AZURE_136:Geo-redundant backups are production DR hardening and are intentionally excluded from the single-region dev baseline.
+  #checkov:skip=CKV2_AZURE_57:This server uses private VNet integration through a delegated subnet rather than the Private Endpoint networking model.
+
   name                = local.server_name
   resource_group_name = var.resource_group_name
   location            = var.location
@@ -55,6 +58,10 @@ resource "azurerm_postgresql_flexible_server" "this" {
   depends_on = [
     azurerm_private_dns_zone_virtual_network_link.postgresql
   ]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "azurerm_postgresql_flexible_server_database" "app" {

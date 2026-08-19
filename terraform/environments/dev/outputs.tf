@@ -87,3 +87,28 @@ output "postgresql_database_name" {
   description = "Name of the application PostgreSQL database."
   value       = module.postgresql.database_name
 }
+
+output "storage_account_id" {
+  description = "Resource ID of the application Azure Storage Account."
+  value       = module.storage.storage_account_id
+}
+
+output "storage_account_name" {
+  description = "Name of the application Azure Storage Account."
+  value       = module.storage.storage_account_name
+}
+
+output "storage_blob_endpoint" {
+  description = "Primary Blob endpoint of the application Storage Account."
+  value       = module.storage.primary_blob_endpoint
+}
+
+output "storage_container_name" {
+  description = "Name of the private application Blob container."
+  value       = module.storage.container_name
+}
+
+output "storage_private_endpoint_id" {
+  description = "Resource ID of the Blob private endpoint."
+  value       = module.storage.private_endpoint_id
+}

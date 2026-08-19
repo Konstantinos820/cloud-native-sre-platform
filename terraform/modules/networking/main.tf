@@ -23,6 +23,14 @@ resource "azurerm_network_security_group" "postgresql" {
   tags = var.tags
 }
 
+resource "azurerm_network_security_group" "private_endpoints" {
+  name                = "${var.name_prefix}-private-endpoints-nsg"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+
+  tags = var.tags
+}
+
 resource "azurerm_subnet" "aks" {
   name                 = "${var.name_prefix}-aks-subnet"
   resource_group_name  = var.resource_group_name
@@ -55,7 +63,7 @@ resource "azurerm_subnet" "private_endpoints" {
   virtual_network_name = azurerm_virtual_network.this.name
   address_prefixes     = var.private_endpoints_subnet_prefixes
 
-  private_endpoint_network_policies = "Disabled"
+  private_endpoint_network_policies = "NetworkSecurityGroupEnabled"
 }
 
 resource "azurerm_subnet_network_security_group_association" "aks" {
@@ -66,4 +74,9 @@ resource "azurerm_subnet_network_security_group_association" "aks" {
 resource "azurerm_subnet_network_security_group_association" "postgresql" {
   subnet_id                 = azurerm_subnet.postgresql.id
   network_security_group_id = azurerm_network_security_group.postgresql.id
+}
+
+resource "azurerm_subnet_network_security_group_association" "private_endpoints" {
+  subnet_id                 = azurerm_subnet.private_endpoints.id
+  network_security_group_id = azurerm_network_security_group.private_endpoints.id
 }

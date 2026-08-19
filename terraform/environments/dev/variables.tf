@@ -71,7 +71,7 @@ variable "aks_sku_tier" {
 variable "aks_system_node_vm_size" {
   description = "VM size used by the AKS system node pool."
   type        = string
-  default     = "Standard_D2s_v5"
+  default     = "Standard_D4ds_v5"
 }
 
 variable "aks_system_node_min_count" {
@@ -84,6 +84,45 @@ variable "aks_system_node_max_count" {
   description = "Maximum number of AKS system nodes."
   type        = number
   default     = 5
+}
+
+variable "aks_max_pods_per_node" {
+  description = "Maximum number of Kubernetes pods scheduled per AKS node."
+  type        = number
+  default     = 110
+
+  validation {
+    condition     = var.aks_max_pods_per_node >= 50 && var.aks_max_pods_per_node <= 250
+    error_message = "aks_max_pods_per_node must be between 50 and 250."
+  }
+}
+
+variable "aks_user_node_vm_size" {
+  description = "VM size used by the AKS application user node pool."
+  type        = string
+  default     = "Standard_D2ds_v5"
+}
+
+variable "aks_user_node_min_count" {
+  description = "Minimum number of AKS application user nodes."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.aks_user_node_min_count >= 1
+    error_message = "aks_user_node_min_count must be at least 1."
+  }
+}
+
+variable "aks_user_node_max_count" {
+  description = "Maximum number of AKS application user nodes."
+  type        = number
+  default     = 3
+
+  validation {
+    condition     = var.aks_user_node_max_count >= var.aks_user_node_min_count
+    error_message = "aks_user_node_max_count must be greater than or equal to aks_user_node_min_count."
+  }
 }
 
 variable "aks_pod_cidr" {
@@ -157,4 +196,32 @@ variable "postgresql_database_name" {
   description = "Application PostgreSQL database name."
   type        = string
   default     = "app_db"
+}
+
+variable "storage_container_name" {
+  description = "Name of the private application Blob container."
+  type        = string
+  default     = "app-data"
+}
+
+variable "storage_replication_type" {
+  description = "Replication type used by the application Storage Account."
+  type        = string
+  default     = "ZRS"
+
+  validation {
+    condition     = contains(["LRS", "ZRS", "GRS", "RAGRS", "GZRS", "RAGZRS"], var.storage_replication_type)
+    error_message = "storage_replication_type must be a supported Azure Storage replication type."
+  }
+}
+
+variable "aks_node_os_disk_size_gb" {
+  description = "OS disk size used by AKS node pools."
+  type        = number
+  default     = 60
+
+  validation {
+    condition     = var.aks_node_os_disk_size_gb >= 30
+    error_message = "aks_node_os_disk_size_gb must be at least 30 GB."
+  }
 }
