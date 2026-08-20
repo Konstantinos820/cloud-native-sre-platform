@@ -30,5 +30,5 @@ output "control_plane_identity_id" {
 
 output "kubelet_identity_object_id" {
   description = "Object ID of the AKS kubelet managed identity."
-  value       = azurerm_kubernetes_cluster.this.kubelet_identity[0].object_id
+  value       = azurerm_user_assigned_identity.kubelet.principal_id
 }

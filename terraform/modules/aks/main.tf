@@ -6,6 +6,20 @@ resource "azurerm_user_assigned_identity" "control_plane" {
   tags = var.tags
 }
 
+resource "azurerm_user_assigned_identity" "kubelet" {
+  name                = "${var.name_prefix}-aks-kubelet-mi"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+
+  tags = var.tags
+}
+
+resource "azurerm_role_assignment" "kubelet_identity_operator" {
+  scope                = azurerm_user_assigned_identity.kubelet.id
+  role_definition_name = "Managed Identity Operator"
+  principal_id         = azurerm_user_assigned_identity.control_plane.principal_id
+}
+
 resource "azurerm_role_assignment" "network_contributor" {
   scope                = var.aks_subnet_id
   role_definition_name = "Network Contributor"
@@ -79,6 +93,11 @@ resource "azurerm_kubernetes_cluster" "this" {
     type         = "UserAssigned"
     identity_ids = [azurerm_user_assigned_identity.control_plane.id]
   }
+  kubelet_identity {
+    client_id                 = azurerm_user_assigned_identity.kubelet.client_id
+    object_id                 = azurerm_user_assigned_identity.kubelet.principal_id
+    user_assigned_identity_id = azurerm_user_assigned_identity.kubelet.id
+  }
 
   azure_active_directory_role_based_access_control {
     azure_rbac_enabled     = true
@@ -103,14 +122,15 @@ resource "azurerm_kubernetes_cluster" "this" {
   tags = var.tags
 
   depends_on = [
-    azurerm_role_assignment.network_contributor
+    azurerm_role_assignment.network_contributor,
+    azurerm_role_assignment.kubelet_identity_operator,
   ]
 }
 
 resource "azurerm_role_assignment" "acr_pull" {
   scope                = var.acr_id
   role_definition_name = "AcrPull"
-  principal_id         = azurerm_kubernetes_cluster.this.kubelet_identity[0].object_id
+  principal_id         = azurerm_user_assigned_identity.kubelet.principal_id
 
   skip_service_principal_aad_check = true
 }
