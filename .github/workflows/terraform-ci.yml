@@ -1,0 +1,160 @@
+name: Terraform IaC CI
+
+on:
+  push:
+    paths:
+      - "terraform/**"
+      - ".tflint.hcl"
+      - ".github/workflows/terraform-ci.yml"
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "terraform/**"
+      - ".tflint.hcl"
+      - ".github/workflows/terraform-ci.yml"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+
+jobs:
+  terraform:
+    name: Terraform Validate & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.15.8"
+          terraform_wrapper: false
+
+      - name: Show Terraform version
+        run: terraform version
+
+      - name: Check Terraform formatting
+        run: terraform fmt -check -recursive terraform
+
+      - name: Initialize Terraform configurations
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          directories=(
+            "terraform/bootstrap"
+            "terraform/environments/dev"
+            "terraform/modules/acr"
+            "terraform/modules/aks"
+            "terraform/modules/networking"
+            "terraform/modules/postgresql"
+            "terraform/modules/storage"
+          )
+
+          for directory in "${directories[@]}"; do
+            echo "::group::terraform init - $directory"
+            terraform -chdir="$directory" init \
+              -backend=false \
+              -input=false \
+              -no-color
+            echo "::endgroup::"
+          done
+
+      - name: Validate Terraform configurations
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          directories=(
+            "terraform/bootstrap"
+            "terraform/environments/dev"
+            "terraform/modules/acr"
+            "terraform/modules/aks"
+            "terraform/modules/networking"
+            "terraform/modules/postgresql"
+            "terraform/modules/storage"
+          )
+
+          for directory in "${directories[@]}"; do
+            echo "::group::terraform validate - $directory"
+            terraform -chdir="$directory" validate -no-color
+            echo "::endgroup::"
+          done
+
+      - name: Run offline Terraform tests
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test_directories=(
+            "terraform/modules/acr"
+            "terraform/modules/aks"
+            "terraform/modules/networking"
+            "terraform/modules/postgresql"
+            "terraform/modules/storage"
+            "terraform/environments/dev"
+          )
+
+          for directory in "${test_directories[@]}"; do
+            echo "::group::terraform test - $directory"
+            terraform -chdir="$directory" test -no-color
+            echo "::endgroup::"
+          done
+
+  tflint:
+    name: TFLint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v6
+        with:
+          tflint_version: v0.64.0
+          cache: true
+
+      - name: Show TFLint version
+        run: tflint --version
+
+      - name: Initialize TFLint plugins
+        run: tflint --init
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Run TFLint
+        run: tflint --chdir=terraform --recursive --config "$GITHUB_WORKSPACE/.tflint.hcl"
+
+  checkov:
+    name: Checkov Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install Checkov
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "checkov==3.3.12"
+
+      - name: Show Checkov version
+        run: checkov --version
+
+      - name: Run Checkov
+        run: checkov -d terraform --framework terraform
