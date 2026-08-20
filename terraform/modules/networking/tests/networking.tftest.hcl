@@ -151,3 +151,80 @@ run "nsg_association_baseline" {
     error_message = "The private endpoint subnet must remain associated with the private endpoint NSG."
   }
 }
+
+run "postgresql_nsg_segmentation_baseline" {
+  command = plan
+
+  assert {
+    condition = (
+      azurerm_network_security_rule.postgresql_allow_aks.direction == "Inbound" &&
+      azurerm_network_security_rule.postgresql_allow_aks.access == "Allow" &&
+      lower(azurerm_network_security_rule.postgresql_allow_aks.protocol) == "tcp" &&
+      azurerm_network_security_rule.postgresql_allow_aks.destination_port_range == "5432" &&
+      toset(azurerm_network_security_rule.postgresql_allow_aks.source_address_prefixes) == toset(["10.20.0.0/23"])
+    )
+    error_message = "PostgreSQL must allow TCP 5432 from the AKS subnet."
+  }
+
+  assert {
+    condition = (
+      azurerm_network_security_rule.postgresql_allow_self.direction == "Inbound" &&
+      azurerm_network_security_rule.postgresql_allow_self.access == "Allow" &&
+      lower(azurerm_network_security_rule.postgresql_allow_self.protocol) == "tcp" &&
+      azurerm_network_security_rule.postgresql_allow_self.destination_port_range == "5432" &&
+      toset(azurerm_network_security_rule.postgresql_allow_self.source_address_prefixes) == toset(["10.20.2.0/24"])
+    )
+    error_message = "PostgreSQL must retain TCP 5432 communication inside its delegated subnet."
+  }
+
+  assert {
+    condition = (
+      azurerm_network_security_rule.postgresql_deny_other_vnet.direction == "Inbound" &&
+      azurerm_network_security_rule.postgresql_deny_other_vnet.access == "Deny" &&
+      azurerm_network_security_rule.postgresql_deny_other_vnet.source_address_prefix == "VirtualNetwork"
+    )
+    error_message = "Other VirtualNetwork traffic must be denied from the PostgreSQL subnet."
+  }
+
+  assert {
+    condition = (
+      azurerm_network_security_rule.postgresql_allow_aks.priority <
+      azurerm_network_security_rule.postgresql_deny_other_vnet.priority &&
+      azurerm_network_security_rule.postgresql_allow_self.priority <
+      azurerm_network_security_rule.postgresql_deny_other_vnet.priority
+    )
+    error_message = "PostgreSQL allow rules must have higher priority than the VNet deny rule."
+  }
+}
+
+run "private_endpoint_nsg_segmentation_baseline" {
+  command = plan
+
+  assert {
+    condition = (
+      azurerm_network_security_rule.private_endpoints_allow_aks_https.direction == "Inbound" &&
+      azurerm_network_security_rule.private_endpoints_allow_aks_https.access == "Allow" &&
+      lower(azurerm_network_security_rule.private_endpoints_allow_aks_https.protocol) == "tcp" &&
+      azurerm_network_security_rule.private_endpoints_allow_aks_https.destination_port_range == "443" &&
+      toset(azurerm_network_security_rule.private_endpoints_allow_aks_https.source_address_prefixes) == toset(["10.20.0.0/23"])
+    )
+    error_message = "Private Endpoints must allow HTTPS access from the AKS subnet."
+  }
+
+  assert {
+    condition = (
+      azurerm_network_security_rule.private_endpoints_deny_other_vnet.direction == "Inbound" &&
+      azurerm_network_security_rule.private_endpoints_deny_other_vnet.access == "Deny" &&
+      azurerm_network_security_rule.private_endpoints_deny_other_vnet.source_address_prefix == "VirtualNetwork"
+    )
+    error_message = "Other VirtualNetwork traffic must be denied from the Private Endpoints subnet."
+  }
+
+  assert {
+    condition = (
+      azurerm_network_security_rule.private_endpoints_allow_aks_https.priority <
+      azurerm_network_security_rule.private_endpoints_deny_other_vnet.priority
+    )
+    error_message = "The AKS HTTPS allow rule must have higher priority than the Private Endpoint VNet deny rule."
+  }
+}
