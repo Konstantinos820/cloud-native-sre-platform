@@ -11,3 +11,19 @@ trivy-report.json
 .coverage
 htmlcov/
 .pytest_cache/
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+*.tfplan
+.terraform.tfstate.lock.info
+crash.log
+crash.*.log
+
+# Local backend configuration
+backend.hcl
+
+# Terraform child-module lock files
+terraform/modules/**/.terraform.lock.hcl

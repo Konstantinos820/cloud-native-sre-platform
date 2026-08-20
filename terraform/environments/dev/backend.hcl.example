@@ -1,0 +1,8 @@
+# Copy this file to backend.hcl after provisioning the bootstrap infrastructure.
+# backend.hcl is intentionally ignored by Git.
+
+storage_account_name = "REPLACE_WITH_BOOTSTRAP_OUTPUT"
+container_name       = "tfstate"
+key                  = "dev.terraform.tfstate"
+
+use_azuread_auth = true

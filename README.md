@@ -1,402 +1,403 @@
 # Cloud-Native SRE & GitOps Platform
 
-Welcome to my enterprise-grade SRE portfolio project.
+A production-oriented SRE portfolio project demonstrating how a cloud-native application platform can be built around **automation, reliability, observability, security, GitOps, autoscaling, distributed tracing, resilience testing, and Infrastructure as Code**.
 
-This repository is a mono-repo designed to demonstrate how a production-oriented cloud-native platform can be built around **automation, reliability, observability, security, GitOps, autoscaling, testing, distributed tracing, and infrastructure as code**.
-
-The project is intentionally built incrementally, with every milestone introducing another layer of operational maturity.
+The project was developed incrementally across seven milestones, with each milestone introducing another layer of operational maturity.
 
 ---
 
-## Architecture Diagram
+## Project Highlights
+
+| Area | Result |
+|---|---|
+| Application tests | **18/18 passing** |
+| Statement coverage | **100%** |
+| Sustained load test | **29,286 requests / 0 failures** |
+| Throughput | **~165 req/s** |
+| p95 latency | **~1.2 s** |
+| Load-test users | **150 concurrent users** |
+| Pod-kill resilience test | **20,592 requests / 0.09% failure rate** |
+| Terraform native tests | **20/20 passing** |
+| TFLint | **0 findings** |
+| Checkov | **84 passed / 0 failed / 21 documented skips** |
+
+> **Azure deployment status:** The Azure infrastructure defined in Milestone 7 has intentionally **not been provisioned**. It is a production-oriented IaC blueprint validated through Terraform static validation, native mock tests, TFLint, Checkov, and GitHub Actions CI. The repository does not claim that the Azure architecture is currently deployed.
+
+---
+
+# Architecture Overview
+
+The project has two different validation boundaries:
+
+- **Local Kind Runtime** — actually executed and operationally validated.
+- **Azure IaC Blueprint** — statically validated and mock-tested, but not provisioned.
 
 ```mermaid
-graph LR
-    %% =========================================================
-    %% CI
-    %% =========================================================
-    subgraph CI [CI Pipeline]
-        Dev[Developer / Git Push] -->|Triggers| GHA[GitHub Actions CI]
+flowchart TB
+    Dev[Developer / Git Push] --> Repo[GitHub Repository]
 
-        GHA -->|Linting & Tests| Quality[Quality Gates]
-        GHA -->|Security Scanning| Trivy[Trivy]
-        GHA -->|Build Validation| DockerBuild[Docker Image Build]
+    %% =========================================================
+    %% APPLICATION CI
+    %% =========================================================
+    Repo --> AppCI[Application CI<br/>Black · Ruff · Pytest · Trivy · Docker]
+
+    %% =========================================================
+    %% LOCAL EXECUTED RUNTIME
+    %% =========================================================
+    subgraph Local["Executed & Validated — Local Kind Runtime"]
+        ArgoCD[ArgoCD]
+
+        FastAPI[FastAPI Pods]
+        Postgres[(PostgreSQL StatefulSet)]
+
+        MetricsServer[metrics-server]
+        HPA[HorizontalPodAutoscaler]
+
+        Prometheus[Prometheus]
+        Alertmanager[Alertmanager]
+        Grafana[Grafana]
+
+        OTel[OpenTelemetry Collector]
+        Tempo[Tempo]
+
+        ArgoCD -->|Reconciles| FastAPI
+        ArgoCD -->|Reconciles| Postgres
+
+        MetricsServer --> HPA
+        HPA -->|Scales| FastAPI
+
+        FastAPI -->|TCP 5432| Postgres
+
+        Prometheus -->|Scrapes metrics| FastAPI
+        Prometheus --> Alertmanager
+        Alertmanager --> Discord[Discord Alerts]
+
+        FastAPI -->|OTLP gRPC| OTel
+        OTel --> Tempo
+
+        Grafana --> Prometheus
+        Grafana --> Tempo
     end
 
-    %% =========================================================
-    %% External Git Repository
-    %% =========================================================
-    GitRepo[GitHub Repository]
+    Repo -->|Desired state| ArgoCD
 
     %% =========================================================
-    %% Kubernetes Cluster
+    %% TERRAFORM CI
     %% =========================================================
-    subgraph Cluster [Kind Kubernetes Cluster]
+    Repo --> IaCCI[Terraform IaC CI<br/>fmt · validate · test · TFLint · Checkov]
+    Repo --> Terraform[Terraform Configuration]
 
-        %% -----------------------------------------------------
-        %% GitOps
-        %% -----------------------------------------------------
-        ArgoCD[ArgoCD Sync Engine]
-        ArgoCD -->|Pulls Desired State| GitRepo
+    IaCCI -. Validates .-> Terraform
 
-        %% -----------------------------------------------------
-        %% Application Namespace
-        %% -----------------------------------------------------
-        subgraph SRE_NS [sre-platform Namespace]
+    %% =========================================================
+    %% AZURE BLUEPRINT
+    %% =========================================================
+    subgraph Azure["Validated Azure IaC Blueprint — Not Provisioned"]
+        VNet[Azure VNet<br/>10.20.0.0/16]
 
-            FastAPI[FastAPI Pods x2-5]
-            Postgres[(PostgreSQL StatefulSet)]
+        AKSSubnet[AKS Subnet<br/>10.20.0.0/23]
+        PGSubnet[PostgreSQL Delegated Subnet<br/>10.20.2.0/24]
+        PESubnet[Private Endpoints Subnet<br/>10.20.3.0/24]
 
-            HPA[HorizontalPodAutoscaler]
-            ServiceMonitor[ServiceMonitor]
+        AKS[Private AKS]
+        ACRPE[ACR Private Endpoint]
+        ACR[Private ACR]
 
-            HPA -->|Scales| FastAPI
-            FastAPI -->|TCP 5432 allowed by NetworkPolicy| Postgres
-        end
+        AzurePG[(PostgreSQL Flexible Server)]
 
-        %% -----------------------------------------------------
-        %% Cluster-level Components
-        %% -----------------------------------------------------
-        MetricsServer[metrics-server] -->|CPU / Memory Metrics| HPA
+        BlobPE[Blob Private Endpoint]
+        Blob[Private Blob Storage]
 
-        %% -----------------------------------------------------
-        %% Monitoring Namespace
-        %% -----------------------------------------------------
-        subgraph Mon_NS [monitoring Namespace]
+        Identity[Managed Identities<br/>Azure RBAC]
+        State[Terraform Remote State<br/>Azure Blob Architecture]
 
-            PromOperator[Prometheus Operator]
-            Prometheus[Prometheus Server]
-            Rules[Prometheus Rules]
-            Alertmanager[Alertmanager]
+        VNet --> AKSSubnet
+        VNet --> PGSubnet
+        VNet --> PESubnet
 
-            OTelCollector[OpenTelemetry Collector]
-            Tempo[Tempo]
-            Grafana[Grafana]
+        AKSSubnet --> AKS
+        PGSubnet --> AzurePG
 
-            PromOperator -->|Manages| Prometheus
+        PESubnet --> ACRPE
+        ACRPE --> ACR
 
-            ServiceMonitor -->|Defines Scrape Targets| Prometheus
-            Prometheus -->|Scrapes /metrics| FastAPI
+        PESubnet --> BlobPE
+        BlobPE --> Blob
 
-            Prometheus -->|Evaluates| Rules
-            Rules -->|Fires Alerts| Alertmanager
-
-            Grafana -->|Queries Metrics| Prometheus
-
-            FastAPI -->|OTLP gRPC| OTelCollector
-            OTelCollector -->|OTLP gRPC| Tempo
-            Grafana -->|Queries Traces| Tempo
-        end
-
-        %% -----------------------------------------------------
-        %% GitOps Reconciliation
-        %% -----------------------------------------------------
-        ArgoCD -->|Reconciles Application Resources| FastAPI
-        ArgoCD -->|Reconciles Database Resources| Postgres
-        ArgoCD -->|Reconciles Monitoring Resources| PromOperator
-        ArgoCD -->|Reconciles Tracing Resources| OTelCollector
+        Identity --> AKS
+        Identity -->|AcrPull| ACR
     end
 
-    %% =========================================================
-    %% External Notifications
-    %% =========================================================
-    Alertmanager -->|Notifications| Discord[Discord #sre-alerts]
+    Terraform -. Defines, not applied .-> VNet
+    Terraform -. Defines .-> Identity
+    Terraform -. Defines .-> State
 ```
+
+### Responsibility Boundaries
+
+```text
+Terraform  → Azure cloud infrastructure
+Helm       → Kubernetes application packaging
+ArgoCD     → Kubernetes desired-state reconciliation
+```
+
+This separation prevents cloud provisioning and Kubernetes application lifecycle management from becoming tightly coupled.
+
+The complete Terraform architecture and design rationale are documented in [`terraform/README.md`](terraform/README.md).
 
 ---
 
 # Project Roadmap
 
-The platform is being implemented through seven progressive SRE milestones:
+All seven planned milestones are complete.
 
-* **1: CI Pipeline & Docker Containerization with Security Scanning** 🟢 **Completed**
-* **2: Local Kubernetes Orchestration & Helm Packaging** 🟢 **Completed**
-* **3: GitOps Continuous Delivery with ArgoCD & Sealed Secrets** 🟢 **Completed**
-* **4: Observability & Production-Grade Alerting** 🟢 **Completed**
-* **5: Autoscaling & Load Testing** 🟢 **Completed**
-* **6: Distributed Tracing & Chaos Engineering** 🟢 **Completed**
-* **7: Infrastructure as Code with Terraform** ⏳ **Planned**
+- **1: CI Pipeline & Docker Containerization with Security Scanning** — 🟢 **Completed**
+- **2: Local Kubernetes Orchestration & Helm Packaging** — 🟢 **Completed**
+- **3: GitOps Continuous Delivery with ArgoCD & Sealed Secrets** — 🟢 **Completed**
+- **4: Observability & Production-Grade Alerting** — 🟢 **Completed**
+- **5: Autoscaling & Load Testing** — 🟢 **Completed**
+- **6: Distributed Tracing & Chaos Engineering** — 🟢 **Completed**
+- **7: Infrastructure as Code with Terraform & Azure** — 🟢 **Completed**
 
 ---
 
-# 🛠️ Tech Stack & SRE Tooling
+# Tech Stack
 
 ### Application
 
-* FastAPI
-* Python 3.12
-* Pydantic
-* SQLAlchemy
-* PostgreSQL
+- Python 3.12
+- FastAPI
+- Pydantic
+- SQLAlchemy
+- PostgreSQL
 
 ### Kubernetes & Packaging
 
-* Kubernetes
-* Kind
-* Helm v3
-* Kubernetes StatefulSets
-* Kubernetes NetworkPolicies
-* Kubernetes Probes
-* Kubernetes HPA
-* metrics-server
+- Kubernetes
+- Kind
+- Helm v3
+- StatefulSets
+- NetworkPolicies
+- Startup / Liveness / Readiness probes
+- HorizontalPodAutoscaler
+- metrics-server
 
 ### GitOps
 
-* ArgoCD
-* Bitnami Sealed Secrets
+- ArgoCD
+- Bitnami Sealed Secrets
 
 ### Observability
 
-* Prometheus Operator
-* kube-prometheus-stack
-* Prometheus
-* Grafana
-* Alertmanager
-* kube-state-metrics
-* prometheus_client
-* OpenTelemetry
-* OpenTelemetry Collector
-* OTLP/gRPC
-* Tempo
+- Prometheus Operator
+- kube-prometheus-stack
+- Prometheus
+- Grafana
+- Alertmanager
+- kube-state-metrics
+- OpenTelemetry
+- OpenTelemetry Collector
+- OTLP/gRPC
+- Tempo
 
-### Testing & Load Engineering
+### Testing & Resilience
 
-* Pytest
-* Pytest-Cov
-* Locust
-* Kubernetes-based load testing
-* Chaos / resilience testing
+- Pytest
+- Pytest-Cov
+- Locust
+- Kubernetes-based load testing
+- Chaos / resilience testing
+- Terraform native tests
 
 ### CI/CD & Security
 
-* GitHub Actions
-* Docker
-* Multi-stage Docker builds
-* Trivy
-* Ruff
-* Black
+- GitHub Actions
+- Docker
+- Multi-stage Docker builds
+- Trivy
+- Ruff
+- Black
+- TFLint
+- Checkov
 
-### Planned Infrastructure
+### Infrastructure as Code
 
-* Terraform
-* tflint
-* Checkov
-
----
-
-# 🟢 Milestone 1: Secure CI/CD Pipeline
-
-The first phase establishes the automated software delivery and security foundation.
-
-## 1. Code Quality & Testing
-
-Every change is validated through automated quality gates.
-
-* Ruff linting
-* Black formatting
-* Pytest
-* Pytest-Cov
-* Automated test execution in CI
-
-## 2. Multi-stage Docker Builds
-
-The application is packaged using a multi-stage Docker build based on:
-
-`python:3.12-slim-bookworm`
-
-The final container runs as a **non-root user** and contains only the dependencies required to run the application.
-
-## 3. Supply-Chain Security
-
-Trivy is executed directly inside the GitHub Actions pipeline.
-
-The CI pipeline performs:
-
-* Filesystem vulnerability scanning
-* Secret detection
-* Dependency vulnerability scanning
-* Container image vulnerability scanning
-
-The pipeline uses `--ignore-unfixed` so vulnerabilities without an available upstream fix do not unnecessarily block delivery.
-
-> **SRE Implementation Note:** Using the native Trivy CLI instead of depending exclusively on a third-party GitHub Action gives the project greater control over the security scanning environment and makes the same scanner usable locally by developers.
+- Terraform
+- AzureRM Provider
+- Azure Virtual Network
+- Azure Kubernetes Service
+- Azure Container Registry
+- Azure Database for PostgreSQL Flexible Server
+- Azure Blob Storage
+- Azure Private Link
+- Azure Private DNS
+- Azure Managed Identities
+- Azure RBAC
 
 ---
 
-# 🟢 Milestone 2: Local Kubernetes & Helm Packaging
+# Milestone 1 — Secure CI/CD Pipeline
 
-The second phase moves the application from a containerized service into a Kubernetes environment.
+The first milestone established the automated delivery and security foundation.
 
-## 1. Kind Kubernetes Cluster
+### Application quality gates
 
-A local Kubernetes cluster is provisioned using Kind.
+Every change is validated through:
 
-The cluster configuration includes the networking and port mappings required for the platform.
+```text
+Black
+Ruff
+Pytest
+Pytest-Cov
+```
 
-## 2. Helm Packaging
+### Containerization
 
-The application infrastructure is packaged using Helm v3.
+The FastAPI application uses a multi-stage Docker build based on:
 
-The Helm chart contains the core Kubernetes resources required to run the platform.
+```text
+python:3.12-slim-bookworm
+```
 
-Configuration is separated from templates through `values.yaml`.
+The final runtime container:
 
-## 3. PostgreSQL StatefulSet
+- runs as a non-root user
+- contains only runtime dependencies
+- is scanned before being accepted by CI
 
-PostgreSQL runs as a Kubernetes StatefulSet.
+### Security scanning
 
-This provides:
+Trivy performs:
 
-* Stable pod identity
-* Persistent storage
-* Dedicated PVC
-* Stable database networking
+- filesystem vulnerability scanning
+- secret detection
+- dependency vulnerability scanning
+- container image vulnerability scanning
 
-A Headless Service provides DNS-based discovery for the PostgreSQL pod.
+The application and container CI workflow is defined in:
 
-## 4. Network Policies
-
-A default-deny database ingress policy is enforced.
-
-Only the FastAPI application pods are explicitly allowed to connect to PostgreSQL on port `5432`.
-
-## 5. Kubernetes Health Probes
-
-The application exposes separate endpoints for different operational concerns:
-
-### Startup
-
-`/health/startup`
-
-Allows the application time to initialize before other probes become relevant.
-
-### Liveness
-
-`/health/live`
-
-Determines whether the application process itself is alive.
-
-The database is intentionally not checked here.
-
-### Readiness
-
-`/health/ready`
-
-Performs an active database connectivity check.
-
-If PostgreSQL becomes unavailable, Kubernetes removes the pod from service endpoints instead of unnecessarily restarting the application.
-
-## 6. Rolling Updates
-
-The FastAPI Deployment uses a `RollingUpdate` strategy with:
-
-* `maxSurge: 25%`
-* `maxUnavailable: 0`
-
-This ensures new pods become ready before existing pods are removed.
+```text
+.github/workflows/ci.yml
+```
 
 ---
 
-# 🟢 Milestone 3: GitOps Continuous Delivery
+# Milestone 2 — Kubernetes & Helm
 
-The third phase replaces manual Kubernetes deployment operations with a pull-based GitOps workflow.
+The application was moved into a local Kubernetes environment using Kind.
 
-## 1. ArgoCD
+### Helm
 
-ArgoCD runs inside the Kubernetes cluster and continuously watches the Git repository.
+The application is packaged as a Helm chart with configuration separated through `values.yaml`.
 
-The deployment flow is:
+### PostgreSQL
+
+PostgreSQL runs as a StatefulSet with:
+
+- stable pod identity
+- persistent storage
+- dedicated PVC
+- stable service discovery
+
+### NetworkPolicies
+
+Database ingress follows a default-deny model.
+
+Only the FastAPI application is allowed to reach PostgreSQL on:
+
+```text
+TCP/5432
+```
+
+### Health probes
+
+The application exposes separate operational endpoints:
+
+```text
+/health/startup
+/health/live
+/health/ready
+```
+
+The readiness probe checks database availability while the liveness probe intentionally does not.
+
+A database outage therefore removes unhealthy application pods from traffic without unnecessarily restarting the application process.
+
+### Rolling updates
+
+The FastAPI Deployment uses:
+
+```text
+maxSurge:       25%
+maxUnavailable: 0
+```
+
+ensuring replacement pods become ready before existing replicas are removed.
+
+---
+
+# Milestone 3 — GitOps with ArgoCD
+
+ArgoCD replaces manual Kubernetes deployment operations with pull-based reconciliation.
 
 ```text
 Developer
-   ↓
+    ↓
 Git Push
-   ↓
+    ↓
 GitHub
-   ↓
-ArgoCD detects change
-   ↓
+    ↓
+ArgoCD detects desired-state change
+    ↓
 Helm rendering
-   ↓
+    ↓
 Kubernetes reconciliation
 ```
 
-ArgoCD is configured with:
+ArgoCD uses:
 
-* Automated synchronization
-* `selfHeal: true`
-* `prune: true`
+```text
+automated sync
+selfHeal: true
+prune: true
+```
 
-This means Kubernetes state is continuously reconciled against Git.
+A replica-count change was validated by modifying Git and allowing ArgoCD to reconcile the cluster without running `kubectl apply` or `helm upgrade` manually.
 
-### Verified
+### Sealed Secrets
 
-FastAPI replica scaling was performed by changing `replicaCount` in `values.yaml` and pushing the change to Git.
+Sensitive PostgreSQL credentials are not committed to Git as plaintext.
 
-No manual `kubectl` or `helm upgrade` command was required.
-
-## 2. Sealed Secrets
-
-PostgreSQL credentials are never stored as plaintext in Git.
-
-Bitnami Sealed Secrets is used to encrypt Kubernetes secrets client-side.
-
-The encrypted `SealedSecret` can safely exist in the Git repository while only the controller inside the cluster can decrypt it.
+Bitnami Sealed Secrets stores encrypted secret manifests that can only be decrypted by the controller running inside the Kubernetes cluster.
 
 ---
 
-# 🟢 Milestone 4: Observability & Production-Grade Alerting
+# Milestone 4 — Observability & Alerting
 
-The fourth phase introduces metrics collection, alerting, and operational visibility.
+The platform uses `kube-prometheus-stack` for metrics and alerting.
 
-## 1. Prometheus Operator
+### Application metrics
 
-The platform uses `kube-prometheus-stack`.
+FastAPI exposes Prometheus metrics covering:
 
-Prometheus automatically discovers application metrics through Kubernetes `ServiceMonitor` resources.
+- HTTP requests
+- latency
+- HTTP errors
+- user-registration activity
 
-The configuration was tuned to discover custom `PrometheusRule` resources across namespaces.
+### Custom alerts
 
-## 2. Application Metrics
+Five custom Prometheus rules were implemented:
 
-The FastAPI application exposes Prometheus metrics including:
+```text
+FastAPIHighErrorRate
+FastAPIPodDown
+FastAPIHighLatency
+PostgresDown
+FastAPIPodRestarting
+```
 
-* HTTP request metrics
-* Request latency
-* HTTP error rates
-* User registration metrics
-
-## 3. Custom SRE Alerts
-
-Five custom alerting rules were implemented:
-
-### FastAPIHighErrorRate
-
-Triggers when HTTP 5xx errors exceed the defined threshold.
-
-### FastAPIPodDown
-
-Detects when the FastAPI Prometheus target becomes unavailable.
-
-### FastAPIHighLatency
-
-Detects elevated request latency using percentile-based measurements.
-
-### PostgresDown
-
-Uses Kubernetes state metrics to detect PostgreSQL pod readiness failures.
-
-### FastAPIPodRestarting
-
-Detects unexpected container restarts.
-
-## 4. Alertmanager
-
-Alertmanager handles alert routing and notification delivery.
-
-Alerts are routed to a dedicated Discord channel.
-
-The complete alert lifecycle was validated:
+### Alert lifecycle
 
 ```text
 Application / Kubernetes
@@ -410,202 +411,140 @@ Alertmanager
 Discord
 ```
 
-## 5. GitOps-Compliant Alertmanager Credentials
-
-The Discord webhook configuration is encrypted using Sealed Secrets.
-
-Sensitive webhook credentials are therefore not stored as plaintext in Git.
+Alertmanager credentials are managed through Sealed Secrets rather than plaintext configuration stored in Git.
 
 ---
 
-# 🟢 Milestone 5: Autoscaling & Load Testing
+# Milestone 5 — Autoscaling, Load Testing & Resilience
 
-The fifth phase validates that the platform can dynamically react to workload and recover from failures.
+## Horizontal Pod Autoscaler
 
-## 1. metrics-server
-
-The Kubernetes metrics-server provides CPU and memory metrics required by the HPA.
-
-For the local Kind environment, the kubelet certificate configuration required:
+The FastAPI application uses Kubernetes `autoscaling/v2`.
 
 ```text
---kubelet-insecure-tls
+Minimum replicas: 2
+Maximum replicas: 5
+CPU target:       50%
 ```
 
-This is a local Kind-specific trade-off and would not normally be required in a properly configured managed Kubernetes environment.
-
-## 2. Horizontal Pod Autoscaler
-
-The FastAPI Deployment uses Kubernetes `autoscaling/v2`.
-
-Configuration:
-
-* Minimum replicas: `2`
-* Maximum replicas: `5`
-* CPU target: `50%`
-
-The HPA successfully scaled the application:
+During load testing, the application scaled:
 
 ```text
-2 replicas
-    ↓
-4 replicas
-    ↓
+2
+↓
+4
+↓
 5 replicas
 ```
 
-and automatically returned to the minimum replica count after the load stopped.
+and returned to its minimum replica count after load stopped.
 
-## 3. Load Testing
+---
 
-Locust was initially executed through `kubectl port-forward`.
+## Load Testing
 
-At high concurrency, the test produced approximately:
+The first high-concurrency test was executed through `kubectl port-forward` and produced an apparent failure rate of approximately:
 
 ```text
-94% failure rate
+94%
 ```
 
-Investigation demonstrated that the bottleneck was the `kubectl port-forward` tunnel rather than the application itself.
+Investigation showed that the bottleneck was the port-forward transport itself rather than the application.
 
-The load generator was therefore moved inside the Kubernetes cluster as a Job.
+Locust was moved inside the Kubernetes cluster so traffic could reach the Service directly.
 
-This allowed Locust to communicate directly with the Kubernetes Service.
+The first genuine in-cluster load test then exposed real application bottlenecks:
 
-## 4. Root-Cause Investigation
+- restrictive CPU limits
+- insufficient database connection-pool capacity
+- connection timeout behavior
+- an unbounded `GET /users` query
 
-The first genuine in-cluster load test revealed HTTP 500 failures.
+After addressing the root causes, the final test produced:
 
-Investigation identified several contributing factors:
+```text
+Requests:          29,286
+Failures:          0
+Failure rate:      0.00%
+Throughput:        ~165 req/s
+p95 latency:       ~1.2 s
+Concurrent users:  150
+Duration:          3 minutes
+```
 
-* CPU limit was too restrictive.
-* Database connection pool was too small.
-* Database connection timeout behavior caused request failures.
-* `GET /users` performed an unbounded query without pagination.
+This demonstrated stable application behavior under sustained load.
 
-The first remediation improved the failure rate but significantly increased p95 latency.
+---
 
-This demonstrated that reducing the failure percentage alone does not necessarily mean the system has been fixed.
+## Pod-Kill Resilience Test
 
-## 5. Final Load Test Result
-
-After addressing the underlying bottlenecks:
-
-* **29,286 requests**
-* **0 failures**
-* **0.00% failure rate**
-* **~165 requests/second**
-* **~1.2s p95 latency**
-* **150 concurrent users**
-* **3-minute test**
-
-The final result demonstrated stable application behavior under sustained load.
-
-## 6. Chaos / Resilience Test
-
-A live FastAPI pod was forcefully terminated during a controlled load test.
+A live FastAPI pod was forcefully terminated during sustained traffic.
 
 Observed result:
 
-* **20,592 requests**
-* **0.09% failure rate**
-* **18 failed requests**
-* Failures were isolated to the short interval around pod termination.
-
-Kubernetes automatically recreated the failed pod.
-
-The readiness probes and remaining replicas continued serving traffic.
-
-This validated the platform's basic Kubernetes self-healing behavior.
-
----
-
-# 🟢 Milestone 6: Distributed Tracing & Chaos Engineering
-
-The sixth phase extends platform observability from metrics and alerting into distributed tracing and validates platform behavior under controlled dependency degradation and outages.
-
-The milestone combines:
-
-* OpenTelemetry application instrumentation
-* OpenTelemetry Collector
-* Tempo
-* Grafana trace visualization
-* SQLAlchemy database tracing
-* Controlled network fault injection
-* Kubernetes readiness validation
-* Automated recovery verification
-
----
-
-## 1. OpenTelemetry Application Instrumentation
-
-The FastAPI application is instrumented using:
-
-* OpenTelemetry API
-* OpenTelemetry SDK
-* FastAPI instrumentation
-* SQLAlchemy instrumentation
-* OTLP/gRPC exporter
-
-Tracing is configurable through environment variables:
-
 ```text
-OTEL_TRACES_ENABLED=true
-OTEL_SERVICE_NAME=sre-platform-api
-OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.monitoring.svc.cluster.local:4317
+Requests:      20,592
+Failed:        18
+Failure rate:  0.09%
 ```
 
-Health-check and metrics endpoints are excluded from automatic FastAPI tracing to reduce unnecessary telemetry noise.
+Failures were isolated to the short interval surrounding pod termination.
+
+Kubernetes recreated the failed pod automatically while the remaining replicas continued serving traffic.
 
 ---
 
-## 2. Distributed Tracing Architecture
+# Milestone 6 — Distributed Tracing & Chaos Engineering
 
-The final tracing pipeline is:
+Milestone 6 extended observability from metrics and alerts into request-level distributed tracing and controlled failure experimentation.
+
+---
+
+## OpenTelemetry
+
+The FastAPI application is instrumented with:
+
+- OpenTelemetry API
+- OpenTelemetry SDK
+- FastAPI instrumentation
+- SQLAlchemy instrumentation
+- OTLP/gRPC exporter
+
+Tracing pipeline:
 
 ```text
-HTTP Request
-    ↓
-FastAPI
-    ↓
-SQLAlchemy
-    ↓
-PostgreSQL
-
-FastAPI / SQLAlchemy spans
-    ↓
+FastAPI / SQLAlchemy
+        ↓
 OTLP/gRPC
-    ↓
+        ↓
 OpenTelemetry Collector
-    ↓
+        ↓
 Tempo
-    ↓
+        ↓
 Grafana
 ```
 
-Tempo runs inside the `monitoring` namespace with persistent local storage.
-
-The OpenTelemetry Collector acts as the telemetry ingestion layer between the application and tracing backend.
+Health and metrics endpoints are excluded from automatic tracing to reduce unnecessary telemetry noise.
 
 ---
 
-## 3. End-to-End Trace Validation
+## End-to-End Trace Validation
 
-Real application traffic was generated against the Kubernetes deployment and inspected through Grafana / Tempo.
+Real Kubernetes traffic was inspected through Grafana and Tempo.
 
-A normal `GET /users` request produced a complete trace containing:
+A database-backed `GET /users` request produced a trace similar to:
 
 ```text
-GET /users                 FastAPI SERVER span
+GET /users
 │
-├── connect                SQLAlchemy CLIENT span
-├── SELECT app_db          SQLAlchemy CLIENT span
+├── connect
+├── SELECT app_db
 ├── http send
 ├── http send
 └── http send
 ```
 
-The database spans contained PostgreSQL attributes including:
+Database spans included PostgreSQL attributes such as:
 
 ```text
 db.system = postgresql
@@ -613,29 +552,11 @@ db.name   = app_db
 db.user   = app_user
 ```
 
-and referenced the PostgreSQL Kubernetes service on port `5432`.
-
-Parent-child relationships between the FastAPI server span and SQLAlchemy database spans were verified from real Tempo trace data.
-
-This confirmed the complete path:
-
-```text
-Application
-    ↓
-Instrumentation
-    ↓
-Collector
-    ↓
-Tempo
-    ↓
-Grafana
-```
+Parent-child relationships between the FastAPI server span and SQLAlchemy client spans were validated using real trace data.
 
 ---
 
-## 4. Application Test Coverage
-
-The application test suite currently reports:
+## Application Test Coverage
 
 ```text
 18 tests passed
@@ -655,13 +576,13 @@ src/tracing.py      100%
 TOTAL               100%
 ```
 
-> **Important distinction:** 100% statement coverage demonstrates that the instrumented application code paths are exercised by tests. End-to-end tracing was validated separately against the running Kubernetes environment.
+> 100% statement coverage and end-to-end tracing are separate validation signals. The former validates tested code paths; the latter was validated against the running Kubernetes platform.
 
 ---
 
-## 5. Chaos Engineering Strategy
+## Chaos Engineering
 
-Chaos experiments are implemented as reproducible PowerShell scripts under:
+Reproducible PowerShell experiments are stored under:
 
 ```text
 chaos/
@@ -670,9 +591,7 @@ chaos/
 └── README.md
 ```
 
-Because the local Kind cluster runs a Kubernetes version newer than the officially supported Chaos Mesh compatibility range evaluated during this milestone, fault injection was implemented directly using Linux networking primitives inside the PostgreSQL network namespace.
-
-The experiments use:
+Fault injection uses Linux networking primitives:
 
 ```text
 tc / netem
@@ -680,350 +599,657 @@ iptables
 nsenter
 ```
 
-Runtime identifiers such as container IDs, process IDs, network interfaces, and FastAPI pod IP addresses are dynamically discovered rather than hardcoded.
+Runtime identifiers are discovered dynamically rather than being hardcoded.
 
-Both experiments implement automatic cleanup safeguards.
+Both experiments include automatic cleanup.
 
 ---
 
-## 6. Chaos Experiment — PostgreSQL Network Latency
+### PostgreSQL Latency Experiment
 
-### Hypothesis
-
-Adding PostgreSQL network latency should increase database-backed request latency while allowing requests to remain successful.
-
-After fault removal, latency should return close to baseline without restarting the application.
-
-### Fault
+Injected fault:
 
 ```text
 tc netem delay 300ms
 ```
 
-### Baseline
+Baseline:
 
 ```text
-Requests: 5/5 successful
+5/5 requests successful
 Average: 8.67 ms
 Median:  8.57 ms
 ```
 
-### During Fault
+During fault:
 
 ```text
-Requests: 5/5 successful
+5/5 requests successful
 Average: 910.47 ms
 Median:  910.30 ms
 ```
 
-This produced approximately a **105x increase in observed request latency**.
+The experiment caused approximately a **105x increase in observed request latency**.
 
-Grafana / Tempo trace inspection showed the PostgreSQL operations becoming the dominant request cost.
-
-One manually inspected degraded trace showed approximately:
+After cleanup:
 
 ```text
-GET /users                 ~2.17 s
-├── connect                ~1.55 s
-└── SELECT app_db          ~609 ms
-```
-
-### Recovery
-
-After automatic cleanup:
-
-```text
-Requests: 5/5 successful
+5/5 requests successful
 Average: 8.64 ms
 Median:  8.53 ms
 ```
 
-The PostgreSQL network interface returned to its normal:
-
-```text
-qdisc noqueue
-```
-
-state.
+No application restart was required.
 
 ---
 
-## 7. Chaos Experiment — PostgreSQL Dependency Outage
+### PostgreSQL Dependency Outage
 
-### Hypothesis
+The experiment blocked FastAPI-to-PostgreSQL communication on TCP/5432.
 
-If PostgreSQL becomes unreachable:
+Observed behavior:
 
 ```text
-Database requests should fail
+Database requests failed
         ↓
-Readiness should detect the dependency failure
+Readiness checks failed
         ↓
-FastAPI replicas should become NotReady
+FastAPI replicas became NotReady
         ↓
-Application processes should remain alive
+Application processes remained alive
         ↓
-Removing the fault should restore service automatically
+Fault was removed
+        ↓
+Service recovered automatically
 ```
 
-### Fault
-
-The experiment dynamically discovers the active FastAPI pod IP addresses and inserts PostgreSQL-side rules equivalent to:
+During the outage:
 
 ```text
-REJECT FastAPI Pod A → PostgreSQL TCP/5432
-REJECT FastAPI Pod B → PostgreSQL TCP/5432
-```
-
-### Observed Failure
-
-```text
-Requests during outage: 5/5 failed
+Requests:               5/5 failed
 Ready FastAPI replicas: 0
-FastAPI container restarts: 0
-PostgreSQL: 1/1 Running
+FastAPI restarts:       0
+PostgreSQL:             1/1 Running
 ```
 
-The first failing application request returned:
+Tempo captured the failed PostgreSQL connection span and SQLAlchemy `OperationalError`.
 
-```text
-HTTP 500
-```
-
-Grafana / Tempo captured the corresponding trace.
-
-The PostgreSQL connection span showed:
-
-```text
-Kind: client
-Status: error
-
-db.system = postgresql
-db.name   = app_db
-db.user   = app_user
-
-net.peer.name = sre-platform-app-postgres-headless
-net.peer.port = 5432
-```
-
-The recorded exception was:
-
-```text
-sqlalchemy.exc.OperationalError
-psycopg2.OperationalError
-connection refused
-```
-
-No SQL `SELECT` span was generated because the connection failed before the query could execute.
-
-This provided the complete observable failure chain:
-
-```text
-Controlled Network Fault
-        ↓
-PostgreSQL Connection Refused
-        ↓
-SQLAlchemy OperationalError
-        ↓
-GET /users HTTP 500
-        ↓
-Readiness Failure
-        ↓
-FastAPI Replicas NotReady
-```
-
----
-
-## 8. Automatic Recovery Validation
-
-All injected `iptables` rules were removed automatically through cleanup logic.
-
-Kubernetes subsequently reported:
-
-```text
-Ready FastAPI replicas: 2
-```
-
-Recovery was validated from inside the Kubernetes cluster through the FastAPI Service:
+After cleanup:
 
 ```text
 Recovery requests: 5/5 successful
-FastAPI replicas:  1/1 + 1/1
-PostgreSQL:        1/1
+FastAPI replicas:  2 ready
 FastAPI restarts:  0
+PostgreSQL:        1/1
 ```
 
-The final PostgreSQL INPUT chain contained no injected `REJECT` rules.
-
-The application therefore recovered from the complete database dependency disruption without requiring a FastAPI pod restart.
+This demonstrated observable dependency failure, correct readiness behavior, automatic cleanup, and recovery without restarting the application.
 
 ---
 
-## 9. What Milestone 6 Validated
+# Milestone 7 — Infrastructure as Code with Terraform & Azure
 
-The distributed tracing and chaos engineering phase demonstrated:
+Milestone 7 adds a reusable Azure Infrastructure as Code layer while preserving the responsibility boundary between Terraform, Helm, and ArgoCD.
+
+> **Important:** The Azure infrastructure is a validated blueprint and has not been provisioned.
+
+---
+
+## Terraform Structure
 
 ```text
-Normal Request
-      ↓
-Distributed Trace
-      ↓
-Controlled Fault
-      ↓
-Observable Degradation / Failure
-      ↓
-Kubernetes Readiness Reaction
-      ↓
-Automatic Fault Cleanup
-      ↓
-Service Recovery
-      ↓
-Post-Recovery Validation
+terraform/
+├── README.md
+├── bootstrap/
+├── environments/
+│   └── dev/
+│       └── tests/
+└── modules/
+    ├── acr/
+    ├── aks/
+    ├── networking/
+    ├── postgresql/
+    └── storage/
 ```
 
-The platform now provides trace-level visibility into application and database behavior and has reproducible resilience experiments for both dependency degradation and complete dependency loss.
+The development environment composes reusable modules for:
+
+```text
+Networking
+Azure Container Registry
+Azure Kubernetes Service
+PostgreSQL Flexible Server
+Azure Blob Storage
+```
 
 ---
 
-# ⏳ Milestone 7: Infrastructure as Code
+## Azure Network Architecture
 
-The final milestone will introduce Terraform-based infrastructure provisioning.
+VNet:
 
-Planned infrastructure includes cloud-ready blueprints such as:
+```text
+10.20.0.0/16
+```
 
-* VPC / networking
-* Kubernetes cluster
-* IAM roles
-* Managed PostgreSQL
-* Object storage
-* Supporting cloud infrastructure
+Subnets:
 
-The Terraform layer will remain separated from the application Helm layer.
+```text
+AKS                 10.20.0.0/23
+PostgreSQL          10.20.2.0/24
+Private Endpoints   10.20.3.0/24
+```
 
-Planned CI quality gates include:
+Dedicated NSGs are associated with all three subnets.
+
+### PostgreSQL NSG
+
+Explicit east-west rules enforce:
+
+```text
+ALLOW  AKS subnet        → PostgreSQL TCP/5432
+ALLOW  PostgreSQL subnet → PostgreSQL TCP/5432
+DENY   other VNet traffic → PostgreSQL subnet
+```
+
+The PostgreSQL self-subnet rule preserves Flexible Server communication inside the delegated subnet.
+
+### Private Endpoint NSG
+
+```text
+ALLOW  AKS subnet         → Private Endpoints TCP/443
+DENY   other VNet traffic → Private Endpoints subnet
+```
+
+The AKS NSG intentionally avoids a blanket inbound deny rule.
+
+Workload-level isolation inside Kubernetes remains the responsibility of Cilium/Kubernetes Network Policies.
+
+---
+
+## Azure Container Registry
+
+The registry baseline includes:
+
+```text
+Premium SKU
+Admin account disabled
+Public network access disabled
+Dedicated data endpoint enabled
+30-day untagged manifest retention
+Private Endpoint
+Private DNS
+```
+
+Private DNS:
+
+```text
+privatelink.azurecr.io
+```
+
+AKS pulls images using managed identity and the `AcrPull` role rather than registry administrator credentials.
+
+---
+
+## Private AKS
+
+AKS security and operational controls include:
+
+```text
+Private cluster
+Public API FQDN disabled
+Local accounts disabled
+Azure RBAC
+Kubernetes RBAC
+Azure Policy
+OIDC issuer
+Workload Identity
+Azure CNI Overlay
+Cilium dataplane
+Cilium network policy
+Automatic patch upgrades
+NodeImage OS upgrades
+Secrets Store CSI rotation
+```
+
+### System Node Pool
+
+```text
+VM:            Standard_D4ds_v5
+Autoscaling:   2 → 5
+Max pods:      110
+OS disk:       Ephemeral / 60 GB
+Public IP:     Disabled
+```
+
+The system pool is reserved for critical Kubernetes workloads.
+
+### Application Node Pool
+
+```text
+VM:            Standard_D2ds_v5
+Autoscaling:   1 → 3
+Max pods:      110
+OS disk:       Ephemeral / 60 GB
+Public IP:     Disabled
+```
+
+---
+
+## Managed Identity & RBAC
+
+AKS uses two explicit User Assigned Managed Identities:
+
+```text
+Control Plane Identity
+Kubelet Identity
+```
+
+RBAC relationships:
+
+```text
+Control Plane Identity
+    ├── Network Contributor → AKS subnet
+    └── Managed Identity Operator → Kubelet identity
+
+Kubelet Identity
+    └── AcrPull → Azure Container Registry
+```
+
+Using explicit identities produces deterministic Terraform dependencies rather than relying on an implicitly generated kubelet identity.
+
+---
+
+## PostgreSQL Flexible Server
+
+The managed PostgreSQL blueprint uses:
+
+```text
+PostgreSQL version:     16
+SKU:                    B_Standard_B1ms
+Storage:                32 GB
+Backup retention:       7 days
+Public network access:  Disabled
+Private VNet integration
+Delegated subnet
+Private DNS
+```
+
+The application database uses:
+
+```text
+Name:       app_db
+Charset:    UTF8
+Collation:  en_US.utf8
+```
+
+The administrator password is modeled as a sensitive and ephemeral Terraform input and supplied through the provider's write-only password attribute.
+
+Lifecycle protection is applied to stateful database resources.
+
+---
+
+## Private Blob Storage
+
+Application object storage includes:
+
+```text
+StorageV2
+Standard tier
+ZRS
+HTTPS only
+TLS 1.2
+Public network access disabled
+Shared Key authorization disabled
+OAuth authentication by default
+Infrastructure encryption
+Blob versioning
+14-day deletion retention
+Private container
+Private Endpoint
+Private DNS
+```
+
+Private DNS:
+
+```text
+privatelink.blob.core.windows.net
+```
+
+---
+
+## Terraform Remote State
+
+A separate bootstrap configuration defines the Azure Blob backend architecture.
+
+It includes:
+
+```text
+Resource Group
+Storage Account
+Private tfstate container
+Blob versioning
+Soft-delete protection
+Microsoft Entra RBAC
+Storage Blob Data Contributor
+Shared Key disabled
+```
+
+The bootstrap configuration necessarily begins with local Terraform state.
+
+The development environment includes:
+
+```text
+backend.hcl.example
+```
+
+while the actual:
+
+```text
+backend.hcl
+```
+
+is excluded from Git.
+
+A public backend endpoint can be enabled for GitHub-hosted runners while still requiring Microsoft Entra authentication and keeping Shared Key authorization disabled.
+
+A private runner environment could move the backend behind Private Link.
+
+---
+
+## Terraform Native Tests
+
+Terraform native tests use mock providers and deterministic overrides.
+
+No Azure credentials or Azure API calls are required.
+
+All test runs use planning behavior rather than infrastructure provisioning.
+
+Current coverage:
+
+```text
+ACR              3
+AKS              3
+Networking       6
+PostgreSQL       4
+Storage          3
+Dev Composition  1
+──────────────────
+TOTAL           20
+```
+
+Result:
+
+```text
+20 passed
+0 failed
+```
+
+The tests validate important infrastructure invariants such as:
+
+- private AKS controls
+- separate system and application node pools
+- managed identity relationships
+- network segmentation
+- PostgreSQL delegation
+- explicit NSG rules
+- Private Endpoint policy enforcement
+- ACR private connectivity
+- Storage security controls
+- root environment composition
+
+These tests do **not** replace a real Azure deployment test.
+
+---
+
+## Terraform Quality Gates
+
+The complete Terraform codebase passes:
 
 ```text
 terraform fmt
 terraform validate
-tflint
-checkov
+terraform test
+TFLint
+Checkov
 ```
 
-The objective is to demonstrate that the platform can move from a local Kind environment toward reproducible cloud infrastructure.
-
----
-
-# 🧠 SRE Interview Notes
-
-## Why ArgoCD instead of deploying directly from GitHub Actions?
-
-A push-based deployment model requires the CI system to hold Kubernetes credentials.
-
-With ArgoCD:
+Current result:
 
 ```text
-GitHub
-   ↑
-   │ read
-   │
-ArgoCD
-   │
-   ↓
-Kubernetes
+Terraform tests: 20/20 passed
+TFLint:          0 findings
+
+Checkov:
+  Passed:        84
+  Failed:        0
+  Skipped:       21
 ```
 
-The deployment controller runs inside the cluster and continuously reconciles the desired state from Git.
+Checkov skips are documented inline rather than silently ignored.
 
-This reduces the need for external systems to hold direct cluster credentials and provides automatic drift correction.
+Examples include controls related to:
+
+- paid AKS SLA
+- host encryption
+- customer-managed encryption keys
+- multi-region ACR
+- PostgreSQL geo-redundant backups
+- Azure Monitor integration
+- private Terraform backend runner connectivity
+
+These represent deployment-specific production hardening, compliance, availability, or cost decisions rather than hidden failures in the baseline.
 
 ---
 
-## Why StatefulSet instead of Deployment for PostgreSQL?
+## Dedicated Terraform CI
 
-PostgreSQL is stateful.
+Infrastructure validation has its own workflow:
+
+```text
+.github/workflows/terraform-ci.yml
+```
+
+The pipeline contains three independent jobs:
+
+```text
+Terraform Validate & Test
+TFLint
+Checkov Security Scan
+```
+
+Terraform CI performs:
+
+```text
+terraform fmt -check
+terraform init -backend=false
+terraform validate
+terraform test
+```
+
+The workflow deliberately contains no:
+
+```text
+Azure credentials
+az login
+Azure OIDC authentication
+terraform apply
+live Azure provisioning
+```
+
+This makes the workflow an offline IaC quality gate rather than a deployment pipeline.
+
+---
+
+## Validation Boundary
+
+Milestones 1–6 validate a real running environment:
+
+```text
+Kubernetes
+GitOps
+Metrics
+Alerting
+Autoscaling
+Load behavior
+Distributed tracing
+Chaos experiments
+Recovery behavior
+```
+
+Milestone 7 validates a different layer:
+
+```text
+Terraform source
+      ↓
+Formatting
+      ↓
+Static validation
+      ↓
+Mock infrastructure tests
+      ↓
+TFLint
+      ↓
+Checkov
+      ↓
+GitHub Actions CI
+```
+
+The project therefore demonstrates:
+
+```text
+Executed & Validated Local Runtime
+                +
+Validated Azure Infrastructure Blueprint
+```
+
+without presenting unprovisioned Azure infrastructure as a live deployment.
+
+For the full Infrastructure as Code deep dive, see [`terraform/README.md`](terraform/README.md).
+
+---
+
+# CI Workflows
+
+The repository deliberately separates application and infrastructure validation.
+
+```text
+.github/workflows/
+├── ci.yml
+└── terraform-ci.yml
+```
+
+### `ci.yml`
+
+Validates:
+
+```text
+Python formatting
+Python linting
+Application tests
+Coverage
+Filesystem security scanning
+Docker build
+Container image security scanning
+```
+
+### `terraform-ci.yml`
+
+Validates:
+
+```text
+Terraform formatting
+Terraform configuration
+Terraform native tests
+TFLint
+Checkov
+```
+
+This keeps application delivery concerns separate from Infrastructure as Code validation.
+
+---
+
+# Key Engineering Decisions
+
+### Why ArgoCD instead of deploying Kubernetes directly from GitHub Actions?
+
+A push-based model requires CI to hold Kubernetes credentials.
+
+ArgoCD runs inside the cluster and pulls desired state from Git, providing:
+
+- continuous reconciliation
+- self-healing
+- pruning
+- reduced dependency on external deployment credentials
+
+---
+
+### Why separate liveness and readiness?
+
+They answer different questions.
+
+```text
+Liveness  → Is the application process alive?
+Readiness → Can this pod currently serve traffic?
+```
+
+A database outage should remove the pod from service endpoints without repeatedly restarting a healthy application process.
+
+---
+
+### Why StatefulSet for local PostgreSQL?
+
+PostgreSQL requires stable identity and persistent storage.
 
 A StatefulSet provides:
 
-* Stable identity
-* Stable network naming
-* Persistent storage association
-
-A Deployment treats pods as interchangeable replicas, which is not appropriate for a single persistent database instance.
+- stable pod identity
+- stable network naming
+- persistent volume association
 
 ---
 
-## Why separate liveness and readiness probes?
+### Why was Locust moved into the cluster?
 
-They answer different operational questions.
+The original test path through `kubectl port-forward` introduced an artificial bottleneck.
 
-**Liveness:**
-
-> Is the application process alive?
-
-**Readiness:**
-
-> Can this pod currently serve traffic?
-
-A temporary database failure should normally remove the pod from traffic rather than cause Kubernetes to repeatedly restart it.
+Moving Locust inside Kubernetes allowed the test to measure the real application-to-Service path.
 
 ---
 
-## Why use Kubernetes state metrics for PostgreSQL alerting?
+### Why Terraform + Helm + ArgoCD instead of Terraform managing everything?
 
-For this lightweight platform, using `kube-state-metrics` avoids introducing an additional PostgreSQL exporter solely for basic pod availability monitoring.
+Each tool owns a different lifecycle:
 
-The platform can detect PostgreSQL pod readiness directly through Kubernetes state.
+```text
+Terraform  → cloud infrastructure
+Helm       → Kubernetes packaging
+ArgoCD     → Kubernetes reconciliation
+```
 
----
-
-## What did the 94% Locust failure rate teach?
-
-The initial test was performed through `kubectl port-forward`.
-
-The high failure rate was caused by the test transport itself rather than the application.
-
-Moving Locust into the cluster removed the artificial bottleneck and allowed the test to measure the actual application path.
-
-This is an important SRE principle:
-
-> Always understand the traffic path and the test harness before interpreting load-test results.
+This produces cleaner ownership boundaries and avoids tightly coupling infrastructure changes to application deployment behavior.
 
 ---
 
-## What did the first performance fix teach?
+# Repository Structure
 
-The first remediation reduced failures but increased p95 latency.
-
-The problem was not simply a timeout value.
-
-The investigation identified deeper resource and query issues:
-
-* CPU constraints
-* Database connection pool sizing
-* Unbounded database queries
-
-The final fix addressed the underlying bottlenecks rather than simply allowing requests to wait longer.
-
----
-
-# 🏁 Repository Structure
-
-Only the most important files and directories are shown below.
+Only the most important directories are shown.
 
 ```text
 cloud-native-sre-platform/
 │
-├── .github/workflows/
-│   └── ci.yml
+├── .github/
+│   └── workflows/
+│       ├── ci.yml
+│       └── terraform-ci.yml
 │
 ├── app/
 │   ├── src/
-│   │   ├── main.py
-│   │   ├── database.py
 │   │   ├── config.py
+│   │   ├── database.py
+│   │   ├── main.py
 │   │   ├── metrics.py
 │   │   └── tracing.py
-│   │
 │   ├── tests/
 │   ├── Dockerfile
 │   └── requirements.txt
@@ -1042,64 +1268,76 @@ cloud-native-sre-platform/
 │
 ├── loadtest/
 │
+├── terraform/
+│   ├── README.md
+│   ├── bootstrap/
+│   ├── environments/
+│   │   └── dev/
+│   │       └── tests/
+│   └── modules/
+│       ├── acr/
+│       ├── aks/
+│       ├── networking/
+│       ├── postgresql/
+│       └── storage/
+│
 ├── locustfile.py
 ├── kind-config.yaml
 ├── pyproject.toml
-├── .trivyignore
 └── README.md
 ```
 
 ---
 
-# 🚀 Current Status
+# Current Status
 
-The platform has completed the first six SRE milestones.
+## All Seven Milestones Completed
 
-### Completed
+The platform now includes:
 
-* Secure CI/CD pipeline
-* Multi-stage Docker build
-* Trivy security scanning
-* Kubernetes / Kind
-* Helm
-* PostgreSQL StatefulSet
-* Network Policies
-* Kubernetes health probes
-* Rolling deployments
-* ArgoCD GitOps
-* Sealed Secrets
-* Prometheus
-* Grafana
-* Alertmanager
-* Discord alerting
-* metrics-server
-* HPA autoscaling
-* In-cluster Locust load testing
-* Performance root-cause investigation
-* Kubernetes self-healing / pod-kill resilience testing
-* OpenTelemetry application instrumentation
-* OpenTelemetry Collector
-* SQLAlchemy distributed tracing
-* Tempo trace storage
-* Grafana trace visualization
-* End-to-end FastAPI → PostgreSQL trace validation
-* Reproducible PostgreSQL latency chaos experiment
-* Reproducible PostgreSQL dependency outage experiment
-* Automated chaos cleanup and recovery validation
-* **100% statement coverage**
-* **18/18 unit tests passing**
+- secure application CI
+- container security scanning
+- Kubernetes orchestration
+- Helm packaging
+- GitOps reconciliation
+- encrypted secrets
+- metrics and production-style alerting
+- autoscaling
+- in-cluster load testing
+- performance root-cause analysis
+- pod failure resilience testing
+- distributed tracing
+- reproducible dependency chaos experiments
+- automated recovery validation
+- modular Azure Terraform infrastructure
+- private AKS architecture
+- managed identities and RBAC
+- managed PostgreSQL private networking
+- private ACR and Blob Storage
+- explicit NSG segmentation
+- remote Terraform state architecture
+- offline Terraform infrastructure tests
+- dedicated IaC CI
 
-### Current Work
+Validated results:
 
-**Milestone 7 — Infrastructure as Code with Terraform**
+```text
+Application tests:      18/18
+Statement coverage:     100%
 
-The final milestone will introduce reproducible cloud infrastructure provisioning and infrastructure-focused CI validation.
+Terraform tests:        20/20
+TFLint findings:        0
+Checkov failures:       0
+Checkov passed checks:  84
+```
+
+The Azure architecture remains intentionally **unprovisioned** and is described as a validated Infrastructure as Code blueprint rather than a live environment.
 
 ---
 
-# 🎯 Project Objective
+# Project Objective
 
-The final objective is to demonstrate a complete SRE-oriented platform lifecycle:
+The project demonstrates a complete SRE-oriented engineering lifecycle:
 
 ```text
 Code
@@ -1124,11 +1362,11 @@ Autoscaling
  ↓
 Load Testing
  ↓
-Chaos Engineering
- ↓
 Distributed Tracing
+ ↓
+Chaos Engineering
  ↓
 Infrastructure as Code
 ```
 
-The emphasis throughout the project is on **measurable reliability, reproducibility, automation, failure investigation, and operational correctness**, rather than simply deploying a containerized application.
+The emphasis throughout the project is on **measurable reliability, reproducibility, automation, failure investigation, security, and operational correctness** rather than simply deploying a containerized application.
