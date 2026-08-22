@@ -1,8 +1,8 @@
 # Cloud-Native SRE & GitOps Platform
 
-A production-oriented SRE portfolio project demonstrating how a cloud-native application platform can be built around **automation, reliability, observability, security, GitOps, autoscaling, distributed tracing, resilience testing, and Infrastructure as Code**.
+An SRE portfolio project built to put **automation, reliability, observability, security, GitOps, autoscaling, distributed tracing, resilience testing, and Infrastructure as Code** into practice on a cloud-native application platform.
 
-The project was developed incrementally across seven milestones, with each milestone introducing another layer of operational maturity.
+I built the project in seven milestones, adding a new operational layer at each stage.
 
 ---
 
@@ -27,7 +27,7 @@ The project was developed incrementally across seven milestones, with each miles
 
 # Architecture Overview
 
-The project has two different validation boundaries:
+The project is split into two validation boundaries:
 
 - **Local Kind Runtime** — actually executed and operationally validated.
 - **Azure IaC Blueprint** — statically validated and mock-tested, but not provisioned.
@@ -141,9 +141,9 @@ Helm       → Kubernetes application packaging
 ArgoCD     → Kubernetes desired-state reconciliation
 ```
 
-This separation prevents cloud provisioning and Kubernetes application lifecycle management from becoming tightly coupled.
+This keeps cloud provisioning separate from the Kubernetes application lifecycle instead of tying both together.
 
-The complete Terraform architecture and design rationale are documented in [`terraform/README.md`](terraform/README.md).
+The full Terraform architecture and the reasoning behind it are documented in [`terraform/README.md`](terraform/README.md).
 
 ---
 
@@ -238,11 +238,11 @@ All seven planned milestones are complete.
 
 # Milestone 1 — Secure CI/CD Pipeline
 
-The first milestone established the automated delivery and security foundation.
+The first milestone set up the CI and security foundation for the rest of the project.
 
 ### Application quality gates
 
-Every change is validated through:
+Each change goes through:
 
 ```text
 Black
@@ -253,7 +253,7 @@ Pytest-Cov
 
 ### Containerization
 
-The FastAPI application uses a multi-stage Docker build based on:
+The FastAPI application is built with a multi-stage Docker image based on:
 
 ```text
 python:3.12-slim-bookworm
@@ -284,11 +284,11 @@ The application and container CI workflow is defined in:
 
 # Milestone 2 — Kubernetes & Helm
 
-The application was moved into a local Kubernetes environment using Kind.
+The application was then moved into a local Kubernetes environment running on Kind.
 
 ### Helm
 
-The application is packaged as a Helm chart with configuration separated through `values.yaml`.
+The application is packaged as a Helm chart, with environment-specific configuration kept in `values.yaml`.
 
 ### PostgreSQL
 
@@ -301,9 +301,9 @@ PostgreSQL runs as a StatefulSet with:
 
 ### NetworkPolicies
 
-Database ingress follows a default-deny model.
+Database ingress uses a default-deny approach.
 
-Only the FastAPI application is allowed to reach PostgreSQL on:
+Only the FastAPI application can connect to PostgreSQL on:
 
 ```text
 TCP/5432
@@ -311,7 +311,7 @@ TCP/5432
 
 ### Health probes
 
-The application exposes separate operational endpoints:
+The application exposes separate endpoints for startup, liveness, and readiness checks:
 
 ```text
 /health/startup
@@ -319,9 +319,9 @@ The application exposes separate operational endpoints:
 /health/ready
 ```
 
-The readiness probe checks database availability while the liveness probe intentionally does not.
+The readiness probe checks whether the database is available, while the liveness probe only checks that the application process is still alive.
 
-A database outage therefore removes unhealthy application pods from traffic without unnecessarily restarting the application process.
+So if the database goes down, the pod is taken out of service without restarting an otherwise healthy FastAPI process.
 
 ### Rolling updates
 
@@ -332,13 +332,13 @@ maxSurge:       25%
 maxUnavailable: 0
 ```
 
-ensuring replacement pods become ready before existing replicas are removed.
+This makes sure replacement pods are ready before the existing replicas are removed.
 
 ---
 
 # Milestone 3 — GitOps with ArgoCD
 
-ArgoCD replaces manual Kubernetes deployment operations with pull-based reconciliation.
+ArgoCD is used instead of manually pushing Kubernetes deployments, so the cluster pulls and reconciles the desired state from Git.
 
 ```text
 Developer
@@ -362,23 +362,23 @@ selfHeal: true
 prune: true
 ```
 
-A replica-count change was validated by modifying Git and allowing ArgoCD to reconcile the cluster without running `kubectl apply` or `helm upgrade` manually.
+I verified the GitOps flow by changing the replica count in Git and letting ArgoCD reconcile it without running `kubectl apply` or `helm upgrade` manually.
 
 ### Sealed Secrets
 
-Sensitive PostgreSQL credentials are not committed to Git as plaintext.
+PostgreSQL credentials are not stored in Git as plaintext.
 
-Bitnami Sealed Secrets stores encrypted secret manifests that can only be decrypted by the controller running inside the Kubernetes cluster.
+Bitnami Sealed Secrets keeps the secret manifests encrypted in Git, and only the controller inside the cluster can decrypt them.
 
 ---
 
 # Milestone 4 — Observability & Alerting
 
-The platform uses `kube-prometheus-stack` for metrics and alerting.
+Metrics and alerting are handled with `kube-prometheus-stack`.
 
 ### Application metrics
 
-FastAPI exposes Prometheus metrics covering:
+FastAPI exposes Prometheus metrics for:
 
 - HTTP requests
 - latency
@@ -387,7 +387,7 @@ FastAPI exposes Prometheus metrics covering:
 
 ### Custom alerts
 
-Five custom Prometheus rules were implemented:
+I added five custom Prometheus alert rules:
 
 ```text
 FastAPIHighErrorRate
@@ -411,7 +411,7 @@ Alertmanager
 Discord
 ```
 
-Alertmanager credentials are managed through Sealed Secrets rather than plaintext configuration stored in Git.
+Alertmanager credentials are also handled through Sealed Secrets instead of being stored in Git as plaintext.
 
 ---
 
@@ -427,7 +427,7 @@ Maximum replicas: 5
 CPU target:       50%
 ```
 
-During load testing, the application scaled:
+During the load test, the application scaled from:
 
 ```text
 2
@@ -437,30 +437,30 @@ During load testing, the application scaled:
 5 replicas
 ```
 
-and returned to its minimum replica count after load stopped.
+After the load stopped, it scaled back down to the minimum replica count.
 
 ---
 
 ## Load Testing
 
-The first high-concurrency test was executed through `kubectl port-forward` and produced an apparent failure rate of approximately:
+The first high-concurrency test went through `kubectl port-forward` and showed an apparent failure rate of about:
 
 ```text
 94%
 ```
 
-Investigation showed that the bottleneck was the port-forward transport itself rather than the application.
+After checking the results, the main bottleneck turned out to be `kubectl port-forward`, not the application itself.
 
-Locust was moved inside the Kubernetes cluster so traffic could reach the Service directly.
+I moved Locust inside the Kubernetes cluster so it could send traffic directly to the Service.
 
-The first genuine in-cluster load test then exposed real application bottlenecks:
+Once the test was running inside the cluster, it exposed the actual application bottlenecks:
 
 - restrictive CPU limits
 - insufficient database connection-pool capacity
 - connection timeout behavior
 - an unbounded `GET /users` query
 
-After addressing the root causes, the final test produced:
+After fixing those issues, the final test produced:
 
 ```text
 Requests:          29,286
@@ -472,13 +472,13 @@ Concurrent users:  150
 Duration:          3 minutes
 ```
 
-This demonstrated stable application behavior under sustained load.
+The final run stayed stable under sustained load.
 
 ---
 
 ## Pod-Kill Resilience Test
 
-A live FastAPI pod was forcefully terminated during sustained traffic.
+I forcefully terminated one FastAPI pod while traffic was still running.
 
 Observed result:
 
@@ -488,15 +488,15 @@ Failed:        18
 Failure rate:  0.09%
 ```
 
-Failures were isolated to the short interval surrounding pod termination.
+The failures only happened during the short window around the pod termination.
 
-Kubernetes recreated the failed pod automatically while the remaining replicas continued serving traffic.
+Kubernetes recreated the pod automatically while the remaining replicas kept serving traffic.
 
 ---
 
 # Milestone 6 — Distributed Tracing & Chaos Engineering
 
-Milestone 6 extended observability from metrics and alerts into request-level distributed tracing and controlled failure experimentation.
+Milestone 6 added request-level tracing and controlled failure testing on top of the existing metrics and alerting setup.
 
 ---
 
@@ -524,15 +524,15 @@ Tempo
 Grafana
 ```
 
-Health and metrics endpoints are excluded from automatic tracing to reduce unnecessary telemetry noise.
+Health and metrics endpoints are excluded from automatic tracing to avoid filling Tempo with unnecessary spans.
 
 ---
 
 ## End-to-End Trace Validation
 
-Real Kubernetes traffic was inspected through Grafana and Tempo.
+I inspected real Kubernetes traffic through Grafana and Tempo.
 
-A database-backed `GET /users` request produced a trace similar to:
+A database-backed `GET /users` request produced a trace like this:
 
 ```text
 GET /users
@@ -552,7 +552,7 @@ db.name   = app_db
 db.user   = app_user
 ```
 
-Parent-child relationships between the FastAPI server span and SQLAlchemy client spans were validated using real trace data.
+The trace data also confirmed the parent-child relationship between the FastAPI server span and the SQLAlchemy client spans.
 
 ---
 
@@ -582,7 +582,7 @@ TOTAL               100%
 
 ## Chaos Engineering
 
-Reproducible PowerShell experiments are stored under:
+The reproducible PowerShell experiments are stored under:
 
 ```text
 chaos/
@@ -599,9 +599,9 @@ iptables
 nsenter
 ```
 
-Runtime identifiers are discovered dynamically rather than being hardcoded.
+Runtime identifiers are discovered dynamically instead of being hardcoded.
 
-Both experiments include automatic cleanup.
+Both experiments clean up their changes automatically.
 
 ---
 
@@ -629,7 +629,7 @@ Average: 910.47 ms
 Median:  910.30 ms
 ```
 
-The experiment caused approximately a **105x increase in observed request latency**.
+The injected delay increased the observed request latency by roughly **105x**.
 
 After cleanup:
 
@@ -639,13 +639,13 @@ Average: 8.64 ms
 Median:  8.53 ms
 ```
 
-No application restart was required.
+The application did not need to be restarted.
 
 ---
 
 ### PostgreSQL Dependency Outage
 
-The experiment blocked FastAPI-to-PostgreSQL communication on TCP/5432.
+This experiment blocked FastAPI-to-PostgreSQL traffic on TCP/5432.
 
 Observed behavior:
 
@@ -672,7 +672,7 @@ FastAPI restarts:       0
 PostgreSQL:             1/1 Running
 ```
 
-Tempo captured the failed PostgreSQL connection span and SQLAlchemy `OperationalError`.
+Tempo captured the failed PostgreSQL connection span together with the SQLAlchemy `OperationalError`.
 
 After cleanup:
 
@@ -683,13 +683,13 @@ FastAPI restarts:  0
 PostgreSQL:        1/1
 ```
 
-This demonstrated observable dependency failure, correct readiness behavior, automatic cleanup, and recovery without restarting the application.
+This showed that the dependency failure was visible, readiness behaved as expected, cleanup worked, and the service recovered without restarting FastAPI.
 
 ---
 
 # Milestone 7 — Infrastructure as Code with Terraform & Azure
 
-Milestone 7 adds a reusable Azure Infrastructure as Code layer while preserving the responsibility boundary between Terraform, Helm, and ArgoCD.
+Milestone 7 adds a reusable Azure Infrastructure as Code layer while keeping Terraform, Helm, and ArgoCD responsible for different parts of the platform.
 
 > **Important:** The Azure infrastructure is a validated blueprint and has not been provisioned.
 
@@ -712,7 +712,7 @@ terraform/
     └── storage/
 ```
 
-The development environment composes reusable modules for:
+The development environment is composed from reusable modules for:
 
 ```text
 Networking
@@ -744,7 +744,7 @@ Dedicated NSGs are associated with all three subnets.
 
 ### PostgreSQL NSG
 
-Explicit east-west rules enforce:
+The east-west traffic rules are:
 
 ```text
 ALLOW  AKS subnet        → PostgreSQL TCP/5432
@@ -752,7 +752,7 @@ ALLOW  PostgreSQL subnet → PostgreSQL TCP/5432
 DENY   other VNet traffic → PostgreSQL subnet
 ```
 
-The PostgreSQL self-subnet rule preserves Flexible Server communication inside the delegated subnet.
+The PostgreSQL self-subnet rule is kept so Flexible Server can communicate correctly inside the delegated subnet.
 
 ### Private Endpoint NSG
 
@@ -761,15 +761,15 @@ ALLOW  AKS subnet         → Private Endpoints TCP/443
 DENY   other VNet traffic → Private Endpoints subnet
 ```
 
-The AKS NSG intentionally avoids a blanket inbound deny rule.
+The AKS NSG does not use a blanket inbound deny rule.
 
-Workload-level isolation inside Kubernetes remains the responsibility of Cilium/Kubernetes Network Policies.
+Workload-level isolation inside Kubernetes is handled by Cilium/Kubernetes Network Policies.
 
 ---
 
 ## Azure Container Registry
 
-The registry baseline includes:
+The registry is configured with:
 
 ```text
 Premium SKU
@@ -787,13 +787,13 @@ Private DNS:
 privatelink.azurecr.io
 ```
 
-AKS pulls images using managed identity and the `AcrPull` role rather than registry administrator credentials.
+AKS pulls images through managed identity with the `AcrPull` role instead of using registry admin credentials.
 
 ---
 
 ## Private AKS
 
-AKS security and operational controls include:
+The AKS configuration includes:
 
 ```text
 Private cluster
@@ -856,13 +856,13 @@ Kubelet Identity
     └── AcrPull → Azure Container Registry
 ```
 
-Using explicit identities produces deterministic Terraform dependencies rather than relying on an implicitly generated kubelet identity.
+Using explicit identities makes the Terraform dependencies clear and avoids relying on an automatically generated kubelet identity.
 
 ---
 
 ## PostgreSQL Flexible Server
 
-The managed PostgreSQL blueprint uses:
+The managed PostgreSQL configuration uses:
 
 ```text
 PostgreSQL version:     16
@@ -883,15 +883,15 @@ Charset:    UTF8
 Collation:  en_US.utf8
 ```
 
-The administrator password is modeled as a sensitive and ephemeral Terraform input and supplied through the provider's write-only password attribute.
+The administrator password is passed as a sensitive and ephemeral Terraform input through the provider's write-only password attribute.
 
-Lifecycle protection is applied to stateful database resources.
+Lifecycle protection is enabled for the stateful database resources.
 
 ---
 
 ## Private Blob Storage
 
-Application object storage includes:
+Application object storage is configured with:
 
 ```text
 StorageV2
@@ -920,7 +920,7 @@ privatelink.blob.core.windows.net
 
 ## Terraform Remote State
 
-A separate bootstrap configuration defines the Azure Blob backend architecture.
+A separate bootstrap configuration defines the Azure Blob backend used for Terraform state.
 
 It includes:
 
@@ -935,7 +935,7 @@ Storage Blob Data Contributor
 Shared Key disabled
 ```
 
-The bootstrap configuration necessarily begins with local Terraform state.
+The bootstrap starts with local Terraform state, since the remote backend does not exist yet.
 
 The development environment includes:
 
@@ -951,19 +951,19 @@ backend.hcl
 
 is excluded from Git.
 
-A public backend endpoint can be enabled for GitHub-hosted runners while still requiring Microsoft Entra authentication and keeping Shared Key authorization disabled.
+For GitHub-hosted runners, the backend can expose a public endpoint while still requiring Microsoft Entra authentication and keeping Shared Key authorization disabled.
 
-A private runner environment could move the backend behind Private Link.
+With a private runner, the backend could instead sit behind Private Link.
 
 ---
 
 ## Terraform Native Tests
 
-Terraform native tests use mock providers and deterministic overrides.
+Terraform native tests use mock providers with deterministic overrides.
 
-No Azure credentials or Azure API calls are required.
+These tests do not need Azure credentials or live Azure API calls.
 
-All test runs use planning behavior rather than infrastructure provisioning.
+All of the tests are planning-only and do not provision infrastructure.
 
 Current coverage:
 
@@ -985,7 +985,7 @@ Result:
 0 failed
 ```
 
-The tests validate important infrastructure invariants such as:
+The tests cover infrastructure checks such as:
 
 - private AKS controls
 - separate system and application node pools
@@ -998,13 +998,13 @@ The tests validate important infrastructure invariants such as:
 - Storage security controls
 - root environment composition
 
-These tests do **not** replace a real Azure deployment test.
+These tests do **not** replace testing against a real Azure deployment.
 
 ---
 
 ## Terraform Quality Gates
 
-The complete Terraform codebase passes:
+The Terraform codebase passes:
 
 ```text
 terraform fmt
@@ -1026,7 +1026,7 @@ Checkov:
   Skipped:       21
 ```
 
-Checkov skips are documented inline rather than silently ignored.
+The Checkov skips are documented inline instead of being silently ignored.
 
 Examples include controls related to:
 
@@ -1038,19 +1038,19 @@ Examples include controls related to:
 - Azure Monitor integration
 - private Terraform backend runner connectivity
 
-These represent deployment-specific production hardening, compliance, availability, or cost decisions rather than hidden failures in the baseline.
+These skips are mostly deployment-specific hardening, compliance, availability, or cost choices rather than hidden failures in the baseline.
 
 ---
 
 ## Dedicated Terraform CI
 
-Infrastructure validation has its own workflow:
+Infrastructure validation has a separate workflow:
 
 ```text
 .github/workflows/terraform-ci.yml
 ```
 
-The pipeline contains three independent jobs:
+The pipeline is split into three independent jobs:
 
 ```text
 Terraform Validate & Test
@@ -1067,7 +1067,7 @@ terraform validate
 terraform test
 ```
 
-The workflow deliberately contains no:
+The workflow intentionally contains no:
 
 ```text
 Azure credentials
@@ -1077,7 +1077,7 @@ terraform apply
 live Azure provisioning
 ```
 
-This makes the workflow an offline IaC quality gate rather than a deployment pipeline.
+So this workflow acts as an offline IaC quality gate, not as a deployment pipeline.
 
 ---
 
@@ -1115,7 +1115,7 @@ Checkov
 GitHub Actions CI
 ```
 
-The project therefore demonstrates:
+The project therefore includes both:
 
 ```text
 Executed & Validated Local Runtime
@@ -1123,7 +1123,7 @@ Executed & Validated Local Runtime
 Validated Azure Infrastructure Blueprint
 ```
 
-without presenting unprovisioned Azure infrastructure as a live deployment.
+without presenting the unprovisioned Azure side as if it were already running.
 
 For the full Infrastructure as Code deep dive, see [`terraform/README.md`](terraform/README.md).
 
@@ -1131,7 +1131,7 @@ For the full Infrastructure as Code deep dive, see [`terraform/README.md`](terra
 
 # CI Workflows
 
-The repository deliberately separates application and infrastructure validation.
+Application and infrastructure validation are kept in separate workflows.
 
 ```text
 .github/workflows/
@@ -1165,7 +1165,7 @@ TFLint
 Checkov
 ```
 
-This keeps application delivery concerns separate from Infrastructure as Code validation.
+This keeps application delivery separate from Infrastructure as Code validation.
 
 ---
 
@@ -1173,9 +1173,9 @@ This keeps application delivery concerns separate from Infrastructure as Code va
 
 ### Why ArgoCD instead of deploying Kubernetes directly from GitHub Actions?
 
-A push-based model requires CI to hold Kubernetes credentials.
+With a push-based model, CI needs direct Kubernetes credentials.
 
-ArgoCD runs inside the cluster and pulls desired state from Git, providing:
+ArgoCD runs inside the cluster and pulls the desired state from Git, which gives:
 
 - continuous reconciliation
 - self-healing
@@ -1186,22 +1186,22 @@ ArgoCD runs inside the cluster and pulls desired state from Git, providing:
 
 ### Why separate liveness and readiness?
 
-They answer different questions.
+They are used for different checks.
 
 ```text
 Liveness  → Is the application process alive?
 Readiness → Can this pod currently serve traffic?
 ```
 
-A database outage should remove the pod from service endpoints without repeatedly restarting a healthy application process.
+If the database is unavailable, the pod should be removed from service endpoints without repeatedly restarting a healthy application process.
 
 ---
 
 ### Why StatefulSet for local PostgreSQL?
 
-PostgreSQL requires stable identity and persistent storage.
+PostgreSQL needs stable identity and persistent storage.
 
-A StatefulSet provides:
+A StatefulSet gives it:
 
 - stable pod identity
 - stable network naming
@@ -1211,15 +1211,15 @@ A StatefulSet provides:
 
 ### Why was Locust moved into the cluster?
 
-The original test path through `kubectl port-forward` introduced an artificial bottleneck.
+The original test path through `kubectl port-forward` created an artificial bottleneck.
 
-Moving Locust inside Kubernetes allowed the test to measure the real application-to-Service path.
+Running Locust inside Kubernetes let the test hit the real application-to-Service path.
 
 ---
 
 ### Why Terraform + Helm + ArgoCD instead of Terraform managing everything?
 
-Each tool owns a different lifecycle:
+Each tool is responsible for a different lifecycle:
 
 ```text
 Terraform  → cloud infrastructure
@@ -1227,13 +1227,13 @@ Helm       → Kubernetes packaging
 ArgoCD     → Kubernetes reconciliation
 ```
 
-This produces cleaner ownership boundaries and avoids tightly coupling infrastructure changes to application deployment behavior.
+This keeps the ownership boundaries clear and avoids coupling infrastructure changes with application deployment behavior.
 
 ---
 
 # Repository Structure
 
-Only the most important directories are shown.
+Only the main directories are shown here.
 
 ```text
 cloud-native-sre-platform/
@@ -1293,7 +1293,7 @@ cloud-native-sre-platform/
 
 ## All Seven Milestones Completed
 
-The platform now includes:
+The completed platform includes:
 
 - secure application CI
 - container security scanning
@@ -1331,13 +1331,13 @@ Checkov failures:       0
 Checkov passed checks:  84
 ```
 
-The Azure architecture remains intentionally **unprovisioned** and is described as a validated Infrastructure as Code blueprint rather than a live environment.
+The Azure architecture is still intentionally **unprovisioned** and is presented as a validated Infrastructure as Code blueprint, not a live environment.
 
 ---
 
 # Project Objective
 
-The project demonstrates a complete SRE-oriented engineering lifecycle:
+The project covers the full SRE-oriented engineering lifecycle:
 
 ```text
 Code
@@ -1369,4 +1369,4 @@ Chaos Engineering
 Infrastructure as Code
 ```
 
-The emphasis throughout the project is on **measurable reliability, reproducibility, automation, failure investigation, security, and operational correctness** rather than simply deploying a containerized application.
+The main focus is on **measurable reliability, reproducibility, automation, failure investigation, security, and operational correctness**, not just on getting a containerized application deployed.
