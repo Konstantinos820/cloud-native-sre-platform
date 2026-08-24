@@ -36,7 +36,7 @@ jobs:
       - name: Run Pytest with Coverage
         run: |
           cd app
-          pytest --cov=src --cov-report=xml tests/
+          pytest --cov=src --cov-report=term-missing --cov-report=xml tests/
 
       # 1. Native εγκατάσταση του Trivy CLI
       - name: Install Trivy CLI
