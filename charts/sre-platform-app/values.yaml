@@ -11,6 +11,7 @@ app:
     tag: "local"
     pullPolicy: IfNotPresent
 
+  # Used only when autoscaling.enabled is false.
   replicaCount: 2
 
   containerPort: 8000
@@ -25,7 +26,7 @@ app:
       cpu: 100m
       memory: 128Mi
     limits:
-      cpu: 500m  # ήταν 200m
+      cpu: 500m
       memory: 256Mi
 
   autoscaling:
@@ -62,7 +63,7 @@ app:
     appVersion: "0.1.0"
     dbPoolSize: "10"
     dbMaxOverflow: "10"
-    dbPoolTimeout: "5"        # ήταν "10" - το 10s ήταν αυτό που έκανε τα requests να στοιβάζονται αντί να αποτυγχάνουν γρήγορα
+    dbPoolTimeout: "5"
 
 postgres:
   image:

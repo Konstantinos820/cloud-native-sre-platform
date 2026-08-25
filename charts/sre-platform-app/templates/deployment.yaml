@@ -6,7 +6,9 @@ metadata:
   labels:
     {{- include "sre-platform-app.appLabels" . | nindent 4 }}
 spec:
+  {{- if not .Values.app.autoscaling.enabled }}
   replicas: {{ .Values.app.replicaCount }}
+  {{- end }}
   strategy:
     type: RollingUpdate
     rollingUpdate:

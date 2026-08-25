@@ -30,6 +30,15 @@ spec:
     server: https://kubernetes.default.svc
     namespace: sre-platform
 
+  # The HPA owns Deployment.spec.replicas while autoscaling is enabled.
+  # Ignore replica drift so ArgoCD does not fight the autoscaler.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      name: sre-platform-app-fastapi
+      jsonPointers:
+        - /spec/replicas
+
   syncPolicy:
     automated:
       selfHeal: true
