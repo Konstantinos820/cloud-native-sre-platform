@@ -14,6 +14,15 @@ COPY requirements.txt .
 # Install Python dependencies into /usr/local so they can be copied to the final image
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir --prefix=/usr/local -r requirements.txt
+
+# pip is only required during the build and is not needed at runtime
+RUN rm -rf \
+    /usr/local/lib/python3.12/site-packages/pip \
+    /usr/local/lib/python3.12/site-packages/pip-*.dist-info && \
+    rm -f \
+    /usr/local/bin/pip \
+    /usr/local/bin/pip3 \
+    /usr/local/bin/pip3.12
     
 # Remove build tools to keep the builder clean and reduce attack surface
 RUN apt-get purge -y --auto-remove gcc build-essential && rm -rf /var/lib/apt/lists/*
