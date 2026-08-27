@@ -1,28 +1,16 @@
-# Chaos Engineering Experiments
+# Chaos Experiment Reference
 
-This directory contains controlled and reproducible chaos experiments for the local Kind-based SRE platform.
+This directory contains the reproducible chaos experiments used by the Cloud-Native SRE & GitOps Platform.
 
-The objective is not simply to introduce failures, but to validate how the platform behaves during dependency degradation and outages:
+The scripts introduce controlled faults into the local Kind environment to validate application degradation, Kubernetes readiness behavior, distributed tracing, cleanup, and service recovery.
 
-```text
-Fault Injection
-      ↓
-Failure / Degradation
-      ↓
-Kubernetes Detection
-      ↓
-Observability
-      ↓
-Automatic Recovery
-      ↓
-Post-Recovery Validation
-```
+For the full design, results, and tracing analysis, see:
 
-These experiments are designed specifically for the local development environment and must not be executed against a production cluster.
+[Distributed Tracing & Chaos Engineering](../docs/tracing-chaos.md)
 
 ---
 
-## Experiments
+# Experiments
 
 ```text
 chaos/
@@ -31,36 +19,118 @@ chaos/
 └── README.md
 ```
 
-Two PostgreSQL dependency scenarios are currently implemented:
+Two PostgreSQL dependency scenarios are implemented:
 
-1. Network latency injection
-2. Complete FastAPI-to-PostgreSQL connectivity disruption
+| Experiment | Fault | Purpose |
+|---|---|---|
+| `postgres-latency.ps1` | `tc netem delay 300ms` | Validate behavior under database network degradation |
+| `postgres-outage.ps1` | PostgreSQL-side `iptables` REJECT rules | Validate complete FastAPI → PostgreSQL connectivity loss |
 
-Both experiments dynamically discover the active PostgreSQL container and network namespace rather than relying on hardcoded container IDs or process IDs.
+Both experiments include automatic cleanup logic.
 
-Cleanup logic is implemented so injected faults are removed even when an experiment terminates unexpectedly after fault injection.
+---
+
+# Important
+
+These scripts modify Linux networking inside the PostgreSQL container network namespace of the **local Kind environment**.
+
+They are intended for controlled local testing.
+
+Do not run them against an environment you do not intend to disrupt.
+
+The experiments do not provision or modify Azure infrastructure.
 
 ---
 
 # Prerequisites
 
-The experiments assume:
+Before running either experiment:
 
-- Windows PowerShell
-- Docker
-- kubectl
-- A running Kind cluster named `kind`
-- Kind control-plane container named `kind-control-plane`
-- The `sre-platform` namespace
-- FastAPI deployed as `sre-platform-app-fastapi`
-- PostgreSQL deployed as `sre-platform-app-postgres-0`
-- Linux `tc`, `iptables`, and `nsenter` available inside the Kind node
+- Docker must be running
+- the Kind cluster must already exist
+- the FastAPI and PostgreSQL workloads must be running
+- `kubectl` must point to the local Kind cluster
+- PowerShell must be available
+- the FastAPI API should be reachable at `http://localhost:8000` for the default script configuration
 
-For experiments that use the host-side API endpoint, start a port-forward in a separate terminal:
+Verify the cluster:
 
 ```powershell
-kubectl port-forward -n sre-platform service/sre-platform-app-fastapi 8000:80
+kubectl config current-context
+kubectl get pods -n sre-platform
 ```
+
+Expected context:
+
+```text
+kind-kind
+```
+
+The application and PostgreSQL pods should be running before fault injection begins.
+
+---
+
+# API Access
+
+The scripts use the FastAPI `/users` endpoint for request validation.
+
+The default API target is:
+
+```text
+http://localhost:8000/users
+```
+
+If the application is not already exposed locally, start a port-forward from a separate PowerShell terminal.
+
+For example:
+
+```powershell
+kubectl port-forward -n sre-platform svc/sre-platform-app-fastapi 8000:80
+```
+
+Leave that terminal open while running the experiment.
+
+> The chaos experiments themselves target the PostgreSQL dependency path inside the Kind environment. The local API endpoint is used to initiate and measure application requests.
+
+---
+
+# Fault Injection Architecture
+
+The experiments target the PostgreSQL network namespace.
+
+```text
+PowerShell Script
+      ↓
+kubectl / Docker
+      ↓
+Kind Node
+      ↓
+PostgreSQL container PID
+      ↓
+nsenter
+      ↓
+PostgreSQL network namespace
+      ↓
+tc / netem or iptables
+```
+
+Runtime values are discovered dynamically rather than relying on permanently hardcoded container IDs or process IDs.
+
+---
+
+# Why Direct Linux Network Faults?
+
+The experiments use Linux networking primitives directly:
+
+```text
+tc / netem
+iptables
+nsenter
+```
+
+This approach was used for the local Kind environment instead of introducing an additional chaos framework.
+
+The fault is applied to the actual PostgreSQL network path rather than simulating failures inside the FastAPI application code.
 
 ---
 
@@ -74,121 +144,133 @@ postgres-latency.ps1
 
 ## Hypothesis
 
-Introducing controlled network latency between FastAPI and PostgreSQL should significantly increase database-backed request latency without necessarily causing request failures.
+Adding PostgreSQL network latency should significantly increase the latency of database-backed requests while allowing the requests to remain successful.
 
-After removing the fault, request latency should return close to the original baseline without restarting application pods.
+After the fault is removed, request latency should return close to its original baseline without restarting FastAPI.
 
-## Fault Injection
+---
 
-The experiment enters the PostgreSQL container network namespace and applies Linux `tc netem` latency to the active network interface.
+## Fault
 
-Default injected delay:
+The experiment applies:
 
 ```text
-300 ms
+tc netem delay 300ms
 ```
+
+inside the PostgreSQL network namespace.
 
 Conceptually:
 
 ```text
 FastAPI
    ↓
-   ↓ +300 ms network delay
+   ↓  artificial network delay
    ↓
 PostgreSQL
 ```
 
-The script automatically discovers:
+---
 
-```text
-PostgreSQL Pod
-      ↓
-container ID
-      ↓
-container PID
-      ↓
-network namespace
-      ↓
-network interface
+## Run
+
+From the repository root:
+
+```powershell
+.\chaos\postgres-latency.ps1
 ```
 
-It also refuses to overwrite an existing `netem` rule.
+The script performs the experiment in stages:
+
+```text
+Pre-flight validation
+        ↓
+Baseline requests
+        ↓
+PostgreSQL network fault injection
+        ↓
+Degraded requests
+        ↓
+Fault cleanup
+        ↓
+Recovery requests
+```
 
 ---
 
-## Automated Test Result
+## Validated Result
+
+One documented run produced:
 
 ### Baseline
 
 ```text
-Requests: 5
-Success: 5/5
-
-Average latency: 8.67 ms
-Median latency:  8.57 ms
+Requests: 5/5 successful
+Average:  8.67 ms
+Median:   8.57 ms
 ```
 
-### During +300 ms Network Fault
+### During Fault
 
 ```text
-Requests: 5
-Success: 5/5
-
-Average latency: 910.47 ms
-Median latency:  910.30 ms
+Requests: 5/5 successful
+Average:  910.47 ms
+Median:   910.30 ms
 ```
 
-This represents approximately a 105x increase in observed request latency while maintaining a 100% request success rate.
+This was approximately a:
+
+```text
+105x
+```
+
+increase in observed request latency.
 
 ### Recovery
 
-After automatic removal of the `netem` rule:
-
 ```text
-Requests: 5
-Success: 5/5
-
-Average latency: 8.64 ms
-Median latency:  8.53 ms
+Requests: 5/5 successful
+Average:  8.64 ms
+Median:   8.53 ms
 ```
 
-The recovered latency returned essentially to the original steady-state baseline.
+The application recovered without requiring a FastAPI restart.
 
 ---
 
-## Trace Evidence
+# Why a 300 ms Fault Can Produce More Than 300 ms of Request Latency
 
-OpenTelemetry traces collected through Tempo and inspected in Grafana showed the database path becoming the dominant contributor during latency injection.
+The injected value is network delay, not a fixed addition to the final HTTP response time.
 
-A manually inspected degraded trace showed approximately:
+A database-backed request may involve several network interactions:
 
 ```text
-GET /users                 ~2.17 s
-├── PostgreSQL connect     ~1.55 s
-└── SELECT app_db          ~609 ms
+Connection establishment
+        ↓
+Database protocol exchange
+        ↓
+SQL request
+        ↓
+SQL response
+        ↓
+Application response
 ```
 
-This provided direct trace-level evidence that the injected PostgreSQL network degradation was responsible for the increased request latency.
+The same degraded network path can therefore affect multiple stages of a request.
 
 ---
 
-## Safety and Cleanup
+# Cleanup Validation
 
-The script uses PowerShell `try/finally` cleanup logic.
+After the latency experiment, the PostgreSQL network interface should return to its normal queueing state.
 
-After the experiment:
-
-```text
-tc qdisc
-```
-
-returned to:
+The validated recovery state was:
 
 ```text
 qdisc noqueue
 ```
 
-confirming that no `netem` latency rule remained active.
+The experiment includes cleanup logic so the injected `netem` rule is removed even when the experiment exits through its cleanup path.
 
 ---
 
@@ -202,113 +284,138 @@ postgres-outage.ps1
 
 ## Hypothesis
 
-If PostgreSQL becomes unreachable from the FastAPI replicas:
+If FastAPI loses connectivity to PostgreSQL:
 
-- database-backed requests should fail,
-- the FastAPI readiness probe should detect the dependency failure,
-- Kubernetes should mark the application replicas NotReady,
-- application containers should remain alive rather than being unnecessarily restarted,
-- removing the fault should allow the application to recover automatically.
+```text
+Database-backed requests should fail
+        ↓
+Readiness should detect dependency failure
+        ↓
+FastAPI replicas should become NotReady
+        ↓
+FastAPI processes should remain alive
+        ↓
+Removing the fault should restore service
+```
+
+The experiment tests dependency availability rather than terminating PostgreSQL itself.
 
 ---
 
-## Fault Injection
+# Fault
 
-The script dynamically discovers the current FastAPI pod IP addresses and inserts PostgreSQL-side `iptables` rules that reject TCP traffic from those pods to port `5432`.
-
-Conceptually:
+The script dynamically discovers the active FastAPI pod IP addresses and adds PostgreSQL-side rules equivalent to:
 
 ```text
-FastAPI Pod A ──X──► PostgreSQL :5432
-FastAPI Pod B ──X──► PostgreSQL :5432
+REJECT FastAPI Pod A → PostgreSQL TCP/5432
+REJECT FastAPI Pod B → PostgreSQL TCP/5432
 ```
 
-Example injected rules:
+The PostgreSQL container remains running.
+
+The fault is:
 
 ```text
-REJECT tcp -- <fastapi-pod-ip> 0.0.0.0/0 tcp dpt:5432 reject-with tcp-reset
+FastAPI cannot reach PostgreSQL
 ```
 
-The rules are tracked individually so cleanup can remove every rule that was successfully created, including partial-failure scenarios.
+not:
+
+```text
+PostgreSQL has been stopped
+```
 
 ---
 
-## Automated Test Result
+# Run
 
-### Normal State
+From the repository root:
 
-Before fault injection:
-
-```text
-FastAPI baseline request: SUCCESS
-FastAPI replicas: Ready
-PostgreSQL: Ready
+```powershell
+.\chaos\postgres-outage.ps1
 ```
 
-### During Outage
-
-Five requests were executed after PostgreSQL connectivity was blocked:
+Default configuration includes:
 
 ```text
-Failed requests: 5/5
+Namespace:          sre-platform
+PostgreSQL pod:     sre-platform-app-postgres-0
+FastAPI deployment: sre-platform-app-fastapi
+Kind node:          kind-control-plane
+API URL:            http://localhost:8000/users
+Samples:            5
 ```
 
-The first request reached FastAPI and returned:
+The script performs:
+
+```text
+Pre-flight validation
+        ↓
+Runtime discovery
+        ↓
+Baseline validation
+        ↓
+iptables fault injection
+        ↓
+Failure validation
+        ↓
+Readiness validation
+        ↓
+Automatic cleanup
+        ↓
+Recovery validation
+```
+
+---
+
+# Validated Failure State
+
+During the dependency outage:
+
+```text
+Requests during outage: 5/5 failed
+Ready FastAPI replicas: 0
+FastAPI restarts:       0
+PostgreSQL:             1/1 Running
+```
+
+The first observed application failure returned:
 
 ```text
 HTTP 500
 ```
 
-Subsequent requests could no longer successfully reach a Ready application backend after Kubernetes readiness reacted to the dependency failure.
-
-During the outage:
+The important distinction is:
 
 ```text
-FastAPI replica 1: 0/1 Running
-FastAPI replica 2: 0/1 Running
+PostgreSQL process
+        ↓
+Still Running
 
-Ready replicas: 0
-Application restarts: 0
+Database connectivity
+        ↓
+Unavailable to FastAPI
 
-PostgreSQL: 1/1 Running
+FastAPI process
+        ↓
+Still alive
+
+FastAPI readiness
+        ↓
+NotReady
 ```
 
-This is the expected behavior for the platform's readiness design.
-
-The application processes remained alive, but Kubernetes stopped considering them eligible to serve traffic while their required PostgreSQL dependency was unavailable.
+This validates the separation between application liveness and dependency-aware readiness.
 
 ---
 
-# Failure Trace Evidence
+# Distributed Trace During Outage
 
-The HTTP 500 generated during the outage was captured by OpenTelemetry and inspected through Grafana / Tempo.
+The failed request was also visible through OpenTelemetry and Tempo.
 
-The trace showed:
+The PostgreSQL connection span reported an error and included PostgreSQL connection attributes.
 
-```text
-GET /users
-│
-├── PostgreSQL connect    ERROR
-│
-├── http send
-└── http send
-```
-
-The failed database span contained:
-
-```text
-Kind: client
-Status: error
-
-db.system = postgresql
-db.name   = app_db
-db.user   = app_user
-
-net.peer.name = sre-platform-app-postgres-headless
-net.peer.port = 5432
-```
-
-The recorded exception was:
+The captured exception included:
 
 ```text
 sqlalchemy.exc.OperationalError
@@ -316,168 +423,167 @@ psycopg2.OperationalError
 connection refused
 ```
 
-No SQL `SELECT` span was present because the application failed while establishing the PostgreSQL connection before a query could be executed.
+No SQL `SELECT` span was generated for the failed request because the connection failed before the query could execute.
 
-This creates a clear causal chain:
+For the full trace analysis, see:
+
+[Distributed Tracing & Chaos Engineering](../docs/tracing-chaos.md)
+
+---
+
+# Automatic Cleanup
+
+The outage script tracks the injected rules and removes them during cleanup.
+
+Conceptually:
 
 ```text
-iptables REJECT
-      ↓
-PostgreSQL connection refused
-      ↓
-SQLAlchemy OperationalError
-      ↓
-GET /users HTTP 500
-      ↓
-Readiness failure
-      ↓
-FastAPI replicas NotReady
+Injected REJECT rules
+        ↓
+Experiment finishes or fails
+        ↓
+Cleanup executes
+        ↓
+REJECT rules removed
+```
+
+The final PostgreSQL INPUT chain should contain no rules introduced by the experiment.
+
+---
+
+# Recovery Validation
+
+After cleanup, the script waits for the FastAPI replicas to recover readiness.
+
+The validated state was:
+
+```text
+Recovery requests: 5/5 successful
+FastAPI replicas:  2 ready
+FastAPI restarts:  0
+PostgreSQL:        1/1
+```
+
+The script also verifies recovery by sending requests through the FastAPI Kubernetes Service from inside the cluster.
+
+Successful completion ends with:
+
+```text
+Experiment finished
+Fault cleanup completed
+Service recovery verified
 ```
 
 ---
 
-# Automatic Recovery
+# Readiness vs Liveness
 
-The experiment removes all injected PostgreSQL `iptables` rules inside a cleanup block.
-
-After cleanup:
+The dependency-outage experiment demonstrates why the application uses different health checks.
 
 ```text
-Ready replicas after recovery: 2
+Liveness
+   ↓
+Is FastAPI itself still alive?
+
+Readiness
+   ↓
+Can FastAPI currently serve traffic correctly?
 ```
 
-The recovered service was then validated from inside the Kubernetes cluster.
-
-Result:
+When PostgreSQL becomes unreachable:
 
 ```text
-Successful recovery requests: 5/5
+FastAPI process remains alive
+        ↓
+No restart required
+
+Database dependency unavailable
+        ↓
+Readiness fails
+        ↓
+Pod removed from normal service
 ```
 
-Final application state:
-
-```text
-FastAPI replica 1: 1/1 Running
-FastAPI replica 2: 1/1 Running
-PostgreSQL:        1/1 Running
-```
-
-FastAPI containers required:
-
-```text
-0 restarts
-```
-
-The application therefore recovered from the dependency outage without requiring a process or pod restart.
+Restarting FastAPI would not repair a network failure between FastAPI and PostgreSQL.
 
 ---
 
-## Recovery Measurement Note
+# Experiment Safety Model
 
-The outage script intentionally validates recovery through the Kubernetes Service from inside the cluster rather than depending exclusively on `kubectl port-forward`.
-
-During the outage all FastAPI replicas can become NotReady, which can make an existing host-side port-forward unsuitable as a recovery verification mechanism.
-
-The recovery path therefore validates:
+Both scripts follow the same basic lifecycle:
 
 ```text
-In-Cluster Client
-      ↓
-Kubernetes Service
-      ↓
-Ready FastAPI Replica
-      ↓
-PostgreSQL
+Discover
+   ↓
+Validate
+   ↓
+Inject
+   ↓
+Observe
+   ↓
+Clean up
+   ↓
+Verify recovery
 ```
 
-The measured recovery request durations should not be interpreted as application performance benchmarks because each validation sample includes `kubectl exec` and Python process startup overhead.
+Important safeguards include:
 
-Performance measurements are handled separately by the dedicated latency and load-testing experiments.
+- dynamic runtime discovery
+- controlled fault scope
+- automatic cleanup
+- post-fault verification
+- recovery checks
+- no modification of persistent PostgreSQL data
 
----
-
-# Safety and Blast Radius
-
-These experiments intentionally modify Linux networking inside the PostgreSQL pod network namespace.
-
-The blast radius is deliberately constrained to the local Kind development cluster.
-
-The scripts:
-
-- discover current runtime identifiers dynamically,
-- check for stale fault rules before execution,
-- avoid hardcoded pod IPs and container PIDs,
-- track successfully injected rules,
-- use automatic cleanup,
-- verify the final network state,
-- verify application recovery.
-
-After the PostgreSQL outage experiment, the final `iptables` INPUT chain contained no injected `REJECT` rules.
-
-After the latency experiment, the PostgreSQL interface returned to its normal `noqueue` qdisc state.
-
----
-
-# Observability Pipeline
-
-Both experiments are observable through the distributed tracing stack:
-
-```text
-FastAPI
-   ↓
-OpenTelemetry Instrumentation
-   ↓
-OTLP/gRPC
-   ↓
-OpenTelemetry Collector
-   ↓
-Tempo
-   ↓
-Grafana
-```
-
-Tracing includes both FastAPI server spans and SQLAlchemy database spans, allowing faults to be correlated with the affected application and PostgreSQL operations.
+These experiments target networking behavior, not the PostgreSQL persistent volume.
 
 ---
 
 # What These Experiments Validate
 
-Together, the two scenarios demonstrate different failure modes.
-
-### Dependency degradation
+Together, the two experiments cover:
 
 ```text
-PostgreSQL becomes slow
-      ↓
-requests remain successful
-      ↓
-request latency increases dramatically
-      ↓
-tracing identifies database operations as the bottleneck
-      ↓
-fault removed
-      ↓
-latency returns to baseline
+Dependency degradation
+        +
+Dependency loss
+        +
+Application behavior
+        +
+Kubernetes readiness reaction
+        +
+Distributed trace visibility
+        +
+Automatic fault cleanup
+        +
+Service recovery
 ```
 
-### Dependency outage
+They are intended as reproducible local resilience experiments, not as production disaster-recovery tests.
+
+---
+
+# What They Do Not Validate
+
+The experiments do not prove:
 
 ```text
-PostgreSQL becomes unreachable
-      ↓
-database request fails
-      ↓
-HTTP 500 observed
-      ↓
-readiness detects dependency failure
-      ↓
-FastAPI replicas become NotReady
-      ↓
-fault removed
-      ↓
-readiness recovers
-      ↓
-traffic succeeds again
+Production AKS resilience
+Azure PostgreSQL failover
+Multi-region recovery
+Database replication behavior
+Production SLO compliance
+Zero-downtime failover
 ```
 
-The experiments demonstrate controlled fault injection, failure detection, distributed observability, Kubernetes readiness behavior, safe cleanup, and automatic service recovery.
+All results apply to the executed local Kind environment.
+
+---
+
+# Related Documentation
+
+- [Root Project README](../README.md)
+- [Distributed Tracing & Chaos Engineering](../docs/tracing-chaos.md)
+- [Kubernetes & Helm](../docs/kubernetes-helm.md)
+- [Observability & Alerting](../docs/observability.md)
+- [Load Testing & Resilience](../docs/load-testing.md)

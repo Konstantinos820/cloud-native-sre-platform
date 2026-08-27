@@ -1,61 +1,51 @@
-# Terraform — Azure Infrastructure as Code
+# Terraform & Azure Infrastructure
 
-This directory contains the Azure Infrastructure as Code layer for the **Cloud-Native SRE & GitOps Platform**.
+This document covers the Azure Infrastructure as Code architecture implemented in Milestone 7 of the Cloud-Native SRE & GitOps Platform.
 
-The Terraform implementation extends the locally validated Kubernetes platform with a **production-oriented Azure infrastructure blueprint** while preserving clear responsibility boundaries between cloud infrastructure, Kubernetes packaging, and GitOps reconciliation.
+The goal of this milestone was to design a reusable Azure infrastructure layer while keeping cloud provisioning separate from Kubernetes application packaging and GitOps reconciliation.
 
-> **Deployment status:** The Azure infrastructure has intentionally **not been provisioned**. The configuration has been formatted, statically validated, linted, security-scanned, tested with Terraform mock providers, and enforced through GitHub Actions CI without creating Azure resources.
+> **Important:** The Azure infrastructure defined here has intentionally **not been provisioned**. It is a validated Infrastructure as Code blueprint, not a live Azure environment.
 
 ---
 
-## Architecture
+# Overview
 
-Terraform owns the Azure infrastructure layer only.
+The Azure architecture is defined with Terraform and is composed from reusable modules.
 
 ```text
 Terraform
-    ↓
-Azure Infrastructure
-    │
-    ├── Resource Group
-    │
-    ├── Virtual Network
-    │   ├── AKS Subnet
-    │   ├── PostgreSQL Delegated Subnet
-    │   └── Private Endpoints Subnet
-    │
-    ├── Network Security Groups
-    │
-    ├── Azure Container Registry
-    │   ├── Private Endpoint
-    │   └── Private DNS
-    │
-    ├── Azure Kubernetes Service
-    │   ├── Private API Server
-    │   ├── System Node Pool
-    │   ├── Application User Node Pool
-    │   ├── Managed Identities
-    │   └── Azure RBAC
-    │
-    ├── PostgreSQL Flexible Server
-    │   ├── Delegated Subnet
-    │   └── Private DNS
-    │
-    └── Azure Blob Storage
-        ├── Private Container
-        ├── Private Endpoint
-        └── Private DNS
-
-Helm
-    ↓
-Kubernetes Application Packaging
-
-ArgoCD
-    ↓
-Continuous Kubernetes Desired-State Reconciliation
+   ↓
+Azure Resource Group
+   ↓
+Networking
+   ├── AKS Subnet
+   ├── PostgreSQL Subnet
+   └── Private Endpoint Subnet
+   ↓
+Private AKS
+   ↓
+Private ACR
+   ↓
+PostgreSQL Flexible Server
+   ↓
+Private Blob Storage
 ```
 
-### Responsibility Model
+The infrastructure is designed around:
+
+- private networking
+- explicit identity and RBAC relationships
+- controlled east-west connectivity
+- private service access
+- reusable Terraform modules
+- static validation and native Terraform tests
+- automated IaC quality gates
+
+---
+
+# Responsibility Boundaries
+
+The project deliberately separates three different infrastructure and application lifecycles.
 
 ```text
 Terraform  → Azure cloud infrastructure
@@ -63,105 +53,56 @@ Helm       → Kubernetes application packaging
 ArgoCD     → Kubernetes desired-state reconciliation
 ```
 
-Terraform does not manage the application-level Kubernetes lifecycle.
+Terraform does not manage the application Helm lifecycle.
 
-This prevents cloud-resource provisioning and application deployment from becoming tightly coupled.
+ArgoCD does not provision Azure infrastructure.
+
+Helm does not create cloud infrastructure.
+
+This prevents unrelated lifecycle concerns from becoming tightly coupled.
 
 ---
 
-# Directory Structure
+# Terraform Structure
 
 ```text
 terraform/
-│
 ├── README.md
-│
 ├── bootstrap/
-│   ├── main.tf
-│   ├── outputs.tf
-│   ├── providers.tf
-│   ├── terraform.tfvars.example
-│   ├── variables.tf
-│   └── versions.tf
-│
 ├── environments/
 │   └── dev/
-│       ├── backend.hcl.example
-│       ├── locals.tf
-│       ├── main.tf
-│       ├── outputs.tf
-│       ├── providers.tf
-│       ├── terraform.tfvars.example
-│       ├── variables.tf
-│       ├── versions.tf
 │       └── tests/
-│           └── dev.tftest.hcl
-│
 └── modules/
     ├── acr/
-    │   └── tests/
-    │
     ├── aks/
-    │   └── tests/
-    │
     ├── networking/
-    │   └── tests/
-    │
     ├── postgresql/
-    │   └── tests/
-    │
     └── storage/
-        └── tests/
 ```
 
-The `dev` environment composes the reusable modules into one infrastructure definition.
+The `dev` environment composes reusable modules for:
 
-The `bootstrap` configuration is intentionally separate because the Terraform remote-state infrastructure must exist before the development environment can use it as a backend.
+```text
+Networking
+Azure Container Registry
+Azure Kubernetes Service
+PostgreSQL Flexible Server
+Azure Blob Storage
+```
+
+This separates reusable infrastructure components from environment-level composition.
 
 ---
 
-# Infrastructure Components
+# Azure Network Architecture
 
-## 1. Resource Group
-
-The development environment defines a dedicated Azure Resource Group that acts as the ownership boundary for the platform resources.
-
-The naming convention is derived from:
+The virtual network uses:
 
 ```text
-<project-name>-<environment>
+VNet: 10.20.0.0/16
 ```
 
-For the current development configuration:
-
-```text
-sre-platform-dev
-```
-
-Common resource tags are generated centrally and propagated to supported Azure resources.
-
-The baseline includes metadata for:
-
-```text
-project
-environment
-managed_by
-repository
-```
-
----
-
-# 2. Virtual Network & Network Segmentation
-
-The networking module defines a dedicated Azure Virtual Network.
-
-### VNet Address Space
-
-```text
-10.20.0.0/16
-```
-
-### Subnets
+It is divided into three main subnets:
 
 ```text
 AKS                 10.20.0.0/23
@@ -169,476 +110,356 @@ PostgreSQL          10.20.2.0/24
 Private Endpoints   10.20.3.0/24
 ```
 
-This separates Kubernetes compute, the managed database, and Azure Private Link endpoints instead of placing all infrastructure inside a shared subnet.
+Dedicated Network Security Groups are associated with the subnets.
 
-Dedicated Network Security Groups are associated with:
-
-```text
-AKS subnet
-PostgreSQL subnet
-Private Endpoints subnet
-```
-
-The PostgreSQL subnet is explicitly delegated to:
+The architecture separates:
 
 ```text
-Microsoft.DBforPostgreSQL/flexibleServers
+Compute workloads
+Database infrastructure
+Private service endpoints
 ```
 
-The Private Endpoints subnet enables NSG policy enforcement for Private Endpoint traffic.
+instead of placing all resources into a single flat network segment.
 
 ---
 
-## NSG Segmentation
+# PostgreSQL Network Controls
 
-The baseline goes beyond simply attaching empty NSGs.
-
-Explicit east-west controls are defined for the PostgreSQL and Private Endpoint boundaries.
-
-### PostgreSQL Inbound Policy
+The PostgreSQL subnet uses explicit east-west traffic rules.
 
 ```text
-ALLOW  AKS subnet         → PostgreSQL subnet TCP/5432
-ALLOW  PostgreSQL subnet  → PostgreSQL subnet TCP/5432
+ALLOW  AKS subnet         → PostgreSQL TCP/5432
+ALLOW  PostgreSQL subnet  → PostgreSQL TCP/5432
 DENY   other VNet traffic → PostgreSQL subnet
 ```
 
-The first rule allows the AKS workload path to reach PostgreSQL.
+The self-subnet rule is retained because Azure Database for PostgreSQL Flexible Server requires communication within its delegated subnet.
 
-The second preserves PostgreSQL communication inside the delegated subnet.
-
-The final rule prevents unrelated VNet sources from relying on Azure's broader default `AllowVNetInBound` behavior to reach the database subnet.
-
-### Private Endpoints Inbound Policy
+The intended application path is:
 
 ```text
-ALLOW  AKS subnet         → Private Endpoints subnet TCP/443
-DENY   other VNet traffic → Private Endpoints subnet
+AKS
+ ↓
+TCP/5432
+ ↓
+PostgreSQL Flexible Server
 ```
 
-This permits AKS nodes to access private Azure PaaS endpoints over HTTPS while restricting unrelated VNet sources.
-
-### AKS NSG Design
-
-The AKS NSG intentionally does **not** implement a blanket inbound deny rule.
-
-AKS node and pod networking has platform-specific communication requirements, particularly with Azure CNI Overlay.
-
-Workload-level Kubernetes isolation remains the responsibility of:
-
-```text
-Cilium
-Kubernetes NetworkPolicy
-```
-
-This keeps Azure subnet-level security and Kubernetes workload-level security as separate control layers.
+Other VNet traffic is not implicitly allowed to reach the PostgreSQL subnet.
 
 ---
 
-# 3. Azure Container Registry
+# Private Endpoint Network Controls
 
-The ACR module defines a private Azure Container Registry for application images.
+Private endpoints are placed in a dedicated subnet.
 
-### Baseline
+The primary access policy is:
 
 ```text
-SKU                    Premium
-Admin account          Disabled
-Public network access  Disabled
-Data endpoint          Enabled
-Retention policy       30 days
+ALLOW  AKS subnet         → Private Endpoints TCP/443
+DENY   other VNet traffic → Private Endpoints subnet
 ```
 
-Premium ACR is used to support the private connectivity model.
+This limits access to services such as ACR and Blob Storage through their private endpoints.
 
-The registry is accessed through an Azure Private Endpoint located in the dedicated Private Endpoints subnet.
+---
 
-### Private DNS
+# Kubernetes vs Azure Network Isolation
+
+Azure network controls and Kubernetes NetworkPolicies operate at different layers.
+
+```text
+Azure NSGs
+    ↓
+Subnet and cloud-network boundaries
+
+Kubernetes / Cilium Network Policies
+    ↓
+Workload-to-workload boundaries
+```
+
+The AKS subnet therefore does not rely on a blanket inbound deny rule for workload isolation.
+
+Workload-level isolation remains the responsibility of Kubernetes networking controls.
+
+---
+
+# Azure Container Registry
+
+The ACR baseline includes:
+
+```text
+Premium SKU
+Admin account disabled
+Public network access disabled
+Dedicated data endpoint enabled
+30-day untagged manifest retention
+Private Endpoint
+Private DNS
+```
+
+Private DNS uses:
 
 ```text
 privatelink.azurecr.io
 ```
 
-The Private DNS zone is linked to the platform VNet.
-
-AKS does not authenticate using registry administrator credentials.
-
-The kubelet managed identity receives:
-
-```text
-AcrPull
-```
-
-over the registry.
+The registry is designed to be consumed privately from AKS.
 
 ---
 
-# 4. Azure Kubernetes Service
+# ACR Authentication
 
-The AKS module defines a private managed Kubernetes cluster.
+AKS does not use registry administrator credentials.
 
-### Security & Platform Controls
+Instead:
 
 ```text
-Private cluster                       Enabled
-Public API FQDN                       Disabled
-Local accounts                        Disabled
-Azure RBAC                            Enabled
-Kubernetes RBAC                       Enabled
-Azure Policy                          Enabled
-OIDC issuer                           Enabled
-Workload Identity                     Enabled
-Automatic upgrade channel             patch
-Node OS upgrade channel               NodeImage
-Secrets Store CSI rotation            Enabled
+AKS Kubelet Identity
+        ↓
+AcrPull role
+        ↓
+Azure Container Registry
 ```
 
-### Networking
+This uses Azure-managed identity and RBAC rather than static registry credentials.
+
+The resulting model is:
 
 ```text
+Identity
+  +
+RBAC
+  +
+Private network access
+```
+
+instead of:
+
+```text
+Username
+  +
+Password
+  +
+Public registry endpoint
+```
+
+---
+
+# Private AKS
+
+The AKS configuration includes:
+
+```text
+Private cluster
+Public API FQDN disabled
+Local accounts disabled
+Azure RBAC
+Kubernetes RBAC
+Azure Policy
+OIDC issuer
+Workload Identity
 Azure CNI Overlay
 Cilium dataplane
 Cilium network policy
-Standard Load Balancer
+Automatic patch upgrades
+NodeImage OS upgrades
+Secrets Store CSI rotation
 ```
 
-The Kubernetes pod and service networks are separate from the Azure VNet address space.
-
-```text
-Pod CIDR        10.244.0.0/16
-Service CIDR    10.0.0.0/16
-DNS Service IP  10.0.0.10
-```
+The design aims to minimize unnecessary public control-plane and workload exposure.
 
 ---
 
-## AKS Node Pool Separation
+# AKS Node Pools
 
-The cluster uses separate system and application node pools.
+The cluster separates system and application workloads.
 
-### System Node Pool
-
-```text
-VM size       Standard_D4ds_v5
-Autoscaling   2 → 5 nodes
-Max pods      110
-OS disk       Ephemeral
-OS disk size  60 GB
-Public IP     Disabled
-```
-
-The system pool is reserved for critical Kubernetes components.
-
-`only_critical_addons_enabled` prevents ordinary application workloads from being scheduled there.
-
-### Application User Node Pool
+## System Node Pool
 
 ```text
-VM size       Standard_D2ds_v5
-Autoscaling   1 → 3 nodes
-Max pods      110
-OS disk       Ephemeral
-OS disk size  60 GB
-Public IP     Disabled
+VM:            Standard_D4ds_v5
+Autoscaling:   2 → 5
+Max pods:      110
+OS disk:       Ephemeral / 60 GB
+Public IP:     Disabled
 ```
 
-Application workloads therefore do not compete directly with critical Kubernetes system components.
+The system pool is intended for critical Kubernetes platform workloads.
+
+## Application Node Pool
+
+```text
+VM:            Standard_D2ds_v5
+Autoscaling:   1 → 3
+Max pods:      110
+OS disk:       Ephemeral / 60 GB
+Public IP:     Disabled
+```
+
+Separating node pools allows system and application workloads to have different capacity and lifecycle characteristics.
 
 ---
 
-# 5. AKS Managed Identity & RBAC Model
+# Managed Identity & RBAC
 
-The AKS architecture uses explicit User Assigned Managed Identities rather than relying entirely on identities generated implicitly during cluster creation.
-
-Two identities are defined:
+AKS uses two explicit User Assigned Managed Identities:
 
 ```text
 Control Plane Identity
 Kubelet Identity
 ```
 
-### Control Plane Identity
-
-Receives:
-
-```text
-Network Contributor
-```
-
-on the AKS subnet.
-
-It also receives:
-
-```text
-Managed Identity Operator
-```
-
-over the kubelet identity.
-
-### Kubelet Identity
-
-Receives:
-
-```text
-AcrPull
-```
-
-over the Azure Container Registry.
-
-The resulting relationship is:
+The main RBAC relationships are:
 
 ```text
 Control Plane Identity
-    │
-    ├── Network Contributor
-    │       └── AKS subnet
-    │
-    └── Managed Identity Operator
-            └── Kubelet Identity
+    ├── Network Contributor → AKS subnet
+    └── Managed Identity Operator → Kubelet identity
 
 Kubelet Identity
-    │
-    └── AcrPull
-            └── Azure Container Registry
+    └── AcrPull → Azure Container Registry
 ```
 
-Using explicit identities makes the Terraform dependency graph deterministic and keeps infrastructure permissions visible in code.
+Using explicit identities makes Terraform dependencies predictable and avoids relying on an implicitly created kubelet identity.
 
 ---
 
-# 6. PostgreSQL Flexible Server
+# PostgreSQL Flexible Server
 
-The PostgreSQL module defines an Azure Database for PostgreSQL Flexible Server.
-
-### Baseline
+The managed PostgreSQL blueprint uses:
 
 ```text
-PostgreSQL version     16
-SKU                    B_Standard_B1ms
-Storage                32 GB
-Backup retention       7 days
-Geo-redundant backup   Disabled
-Public network access  Disabled
-```
-
-The database is not exposed through a public endpoint.
-
-It uses Azure VNet integration through the subnet delegated to PostgreSQL Flexible Server.
-
-Private DNS is linked to the platform VNet.
-
-### Authentication
-
-The current baseline uses password authentication.
-
-The administrator password is represented as a Terraform input that is:
-
-```text
-sensitive
-ephemeral
-```
-
-and is passed through the provider's write-only administrator-password attribute.
-
-The application database is:
-
-```text
-app_db
-```
-
-with UTF-8 encoding.
-
-### Lifecycle Protection
-
-Terraform lifecycle protection is applied to the stateful database resources:
-
-```hcl
-lifecycle {
-  prevent_destroy = true
-}
-```
-
-This provides an additional safeguard against accidental Terraform destruction.
-
-It does not replace backups or disaster-recovery procedures.
-
----
-
-## PostgreSQL Networking Model
-
-PostgreSQL intentionally uses:
-
-```text
-Delegated Subnet
-       +
+PostgreSQL version:     16
+SKU:                    B_Standard_B1ms
+Storage:                32 GB
+Backup retention:       7 days
+Public network access:  Disabled
+Private VNet integration
+Delegated subnet
 Private DNS
 ```
 
-rather than:
+The application database is defined as:
 
 ```text
-Private Endpoint
+Name:       app_db
+Charset:    UTF8
+Collation:  en_US.utf8
 ```
 
-for the Flexible Server itself.
-
-These are different Azure networking models and are not treated as interchangeable within this architecture.
+The database is designed to be accessible through private networking rather than a public database endpoint.
 
 ---
 
-# 7. Azure Blob Storage
+# PostgreSQL Credentials
 
-The Storage module defines private object storage for application data.
+The administrator password is modeled as a sensitive and ephemeral Terraform input.
 
-### Security Baseline
+It is supplied through the provider's write-only password interface.
 
-```text
-Account kind                    StorageV2
-Tier                            Standard
-Replication                     ZRS
-HTTPS only                      Enabled
-Minimum TLS                     TLS 1.2
-Public network access           Disabled
-Public nested items             Disabled
-Shared Key authorization        Disabled
-Default OAuth authentication    Enabled
-Local users                     Disabled
-Cross-tenant replication        Disabled
-Infrastructure encryption       Enabled
-```
+The design avoids treating database credentials as normal Terraform output or reusable plaintext configuration.
 
-### Data Protection
+Sensitive credentials should not be committed to the repository.
+
+---
+
+# Stateful Resource Protection
+
+Lifecycle protection is applied to stateful database resources.
+
+Stateful infrastructure has a different risk profile from stateless compute resources.
+
+Accidental replacement of:
 
 ```text
-Blob versioning              Enabled
-Blob delete retention        14 days
-Container delete retention   14 days
+Application pod
 ```
 
-The application container is private:
+and accidental replacement of:
 
 ```text
-app-data
+Database infrastructure
 ```
 
-### Private Connectivity
+do not have equivalent consequences.
 
-The Storage Account is accessed through an Azure Private Endpoint.
+The Terraform design therefore treats stateful resources more cautiously.
 
-Private Blob DNS:
+---
+
+# Private Blob Storage
+
+Application object storage uses:
+
+```text
+StorageV2
+Standard tier
+ZRS
+HTTPS only
+TLS 1.2
+Public network access disabled
+Shared Key authorization disabled
+OAuth authentication by default
+Infrastructure encryption
+Blob versioning
+14-day deletion retention
+Private container
+Private Endpoint
+Private DNS
+```
+
+Private DNS uses:
 
 ```text
 privatelink.blob.core.windows.net
 ```
 
-The Private DNS zone is linked to the VNet.
-
-Terraform lifecycle protection is applied to persistent Storage resources.
+The design prioritizes identity-based access and private connectivity instead of public endpoints and Shared Key authentication.
 
 ---
 
-## Storage Deployment Requirement
+# Terraform Remote State Architecture
 
-There is an important distinction between defining the Storage resources and applying them in a real Azure environment.
+A separate bootstrap configuration defines the architecture for storing Terraform state in Azure Blob Storage.
 
-The Storage Account baseline uses:
-
-```text
-Shared Key authorization disabled
-Public network access disabled
-Private Endpoint connectivity
-Microsoft Entra authentication
-```
-
-Therefore a real Terraform deployment performing Blob data-plane operations must run from an execution environment that has:
-
-```text
-1. Microsoft Entra data-plane authorization
-2. Appropriate Storage RBAC
-3. Network reachability to the Storage Account / Private Endpoint
-```
-
-For example, creating or managing a private Blob container cannot be assumed to work from an arbitrary public runner after the Storage Account has been completely isolated from public network access.
-
-This repository validates the configuration statically and does not claim that this data-plane path has been live-tested against Azure.
-
----
-
-# Terraform Remote State Bootstrap
-
-The `bootstrap/` configuration defines the infrastructure required for an Azure Blob Terraform backend.
-
-It creates:
+The backend design includes:
 
 ```text
 Resource Group
 Storage Account
 Private tfstate container
-Storage Blob Data Contributor assignment
-```
-
-### Backend Storage Security
-
-```text
-HTTPS only
-TLS 1.2
-Shared Key disabled
-OAuth authentication
 Blob versioning
 Soft-delete protection
-Private container
+Microsoft Entra RBAC
+Storage Blob Data Contributor
+Shared Key disabled
 ```
 
-The executing principal receives:
+Terraform cannot initially use infrastructure that does not yet exist.
+
+The bootstrap configuration therefore begins with local state.
 
 ```text
-Storage Blob Data Contributor
+Bootstrap
+    ↓
+Create remote-state infrastructure
+    ↓
+Configure environment backend
 ```
-
-so Terraform state can be accessed using Microsoft Entra authentication instead of Storage Account keys.
 
 ---
 
-## Why Bootstrap Uses Local State
+# Backend Configuration
 
-The remote backend cannot depend on itself during initial creation.
-
-Therefore:
+The development environment contains:
 
 ```text
-Bootstrap configuration
-        ↓
-Local Terraform state initially
-        ↓
-Azure backend resources created
-        ↓
-Development environment can use remote state
+backend.hcl.example
 ```
 
-After a real bootstrap deployment, the resulting backend values would be used with:
-
-```text
-terraform/environments/dev/backend.hcl
-```
-
-The repository contains only:
-
-```text
-terraform/environments/dev/backend.hcl.example
-```
-
-as a template.
-
-Example:
-
-```hcl
-storage_account_name = "REPLACE_WITH_BOOTSTRAP_OUTPUT"
-container_name       = "tfstate"
-key                  = "dev.terraform.tfstate"
-use_azuread_auth     = true
-```
-
-The real:
+while the real:
 
 ```text
 backend.hcl
@@ -646,138 +467,63 @@ backend.hcl
 
 is excluded from Git.
 
+This prevents environment-specific backend configuration from being unintentionally committed.
+
 ---
 
-# Backend Connectivity Trade-off
+# GitHub-Hosted vs Private Runner Backend Access
 
-The backend Storage Account supports configurable public network access.
+There is an important connectivity trade-off for Terraform CI.
 
-This is intentional because GitHub-hosted runners execute outside the platform VNet and cannot directly reach a Private Endpoint without additional private networking.
+A GitHub-hosted runner cannot normally reach an Azure backend exposed only through private networking.
 
-Even when the public backend endpoint is enabled, the design still keeps:
+One possible model is:
 
 ```text
-Shared Key authorization disabled
-Microsoft Entra authentication required
-Blob container private
+GitHub-hosted runner
+        ↓
+Public backend endpoint
+        +
+Microsoft Entra authentication
+        +
+Shared Key disabled
 ```
 
-A deployment using a self-hosted or privately connected runner could move the Terraform backend behind Azure Private Link.
-
----
-
-## Future CI Authentication Requirement
-
-The current Terraform CI pipeline intentionally performs **no Azure authentication** and does not use the remote backend.
-
-If the project were extended into a real provisioning pipeline using GitHub Actions and Azure workload identity federation, the CI identity would need explicit authorization to the Terraform state backend.
-
-At minimum, the deployment identity would require appropriate Blob data access such as:
+A private runner could instead use:
 
 ```text
-Storage Blob Data Contributor
+Private runner
+        ↓
+Private Link
+        ↓
+Terraform backend
 ```
 
-at the intended backend scope.
-
-This access is deliberately not granted today because the current workflow does not provision Azure infrastructure.
+This is treated as a deployment architecture decision rather than pretending the same network model works for every runner environment.
 
 ---
 
-# Terraform Provider Versions
+# Terraform Native Tests
 
-The development environment currently requires:
+The Terraform codebase includes native Terraform tests.
+
+The tests use:
 
 ```text
-Terraform   >= 1.15.0, < 2.0.0
-AzureRM     5.1.0
+mock providers
+deterministic overrides
+planning behavior
 ```
 
-Modules requiring generated resource-name suffixes also use the Random provider.
-
-Provider versions are locked to improve reproducibility between local development and CI.
-
----
-
-# Local Validation
-
-The Terraform configuration can be validated without provisioning Azure infrastructure.
-
-### Formatting
-
-From the repository root:
-
-```bash
-terraform fmt -check -recursive terraform
-```
-
-### Initialization Without Remote Backend
-
-Example:
-
-```bash
-terraform -chdir=terraform/environments/dev init -backend=false
-```
-
-### Validation
-
-```bash
-terraform -chdir=terraform/environments/dev validate
-```
-
-The same validation strategy is applied independently to:
+They do not require:
 
 ```text
-bootstrap
-ACR module
-AKS module
-networking module
-PostgreSQL module
-storage module
-development environment
+Azure credentials
+Azure API calls
+terraform apply
 ```
 
----
-
-# Offline Terraform Tests
-
-Terraform native tests are stored under the corresponding module or environment `tests/` directories.
-
-The suites use mocked providers such as:
-
-```hcl
-mock_provider "azurerm" {
-  override_during = plan
-}
-```
-
-and where required:
-
-```hcl
-mock_provider "random" {
-  override_during = plan
-}
-```
-
-Provider-computed values such as Azure resource IDs and managed-identity identifiers are replaced with deterministic test overrides.
-
-All current test runs use:
-
-```hcl
-command = plan
-```
-
-No Azure credentials are required.
-
-No Azure API calls are required.
-
-No Azure resources are created.
-
----
-
-# Terraform Test Coverage
-
-Current test distribution:
+Current test coverage:
 
 ```text
 ACR              3
@@ -790,502 +536,309 @@ Dev Composition  1
 TOTAL           20
 ```
 
-## AKS
+Current result:
 
 ```text
-Private cluster security baseline
-System node pool controls
-Application user node pool controls
-Secrets Store CSI rotation
-```
-
-## Networking
-
-```text
-VNet and subnet segmentation
-PostgreSQL subnet delegation
-Private Endpoint subnet policies
-NSG associations
-PostgreSQL NSG east-west segmentation
-Private Endpoint HTTPS segmentation
-```
-
-## PostgreSQL
-
-```text
-Private networking
-Service configuration
-Authentication baseline
-Database configuration
-```
-
-## Storage
-
-```text
-Storage security controls
-Blob data protection
-Private connectivity
-```
-
-## ACR
-
-```text
-Registry security controls
-Private DNS
-Private Endpoint configuration
-```
-
-## Development Environment
-
-```text
-Root module composition
-Exported infrastructure contract
-```
-
-### Current Result
-
-```text
-20 test runs passed
+20 passed
 0 failed
 ```
 
-These tests validate Terraform architecture and configuration invariants without contacting Azure.
+---
 
-They do **not** replace a real Azure provisioning test.
+# What the Native Tests Validate
+
+The tests cover infrastructure invariants such as:
+
+- private AKS controls
+- separate system and application node pools
+- managed identity relationships
+- network segmentation
+- PostgreSQL delegation
+- explicit NSG rules
+- Private Endpoint policy enforcement
+- ACR private connectivity
+- Storage security controls
+- root environment composition
+
+These tests verify expected Terraform planning behavior.
+
+They do **not** replace testing against a real Azure deployment.
 
 ---
 
-# TFLint
+# Terraform Quality Gates
 
-TFLint is configured at repository level through:
-
-```text
-.tflint.hcl
-```
-
-The configuration enables:
+The Terraform codebase is validated with:
 
 ```text
-Terraform recommended rules
-AzureRM ruleset
+terraform fmt
+terraform validate
+terraform test
+TFLint
+Checkov
 ```
-
-Because `.tflint.hcl` is located at repository root, an absolute config path is used when linting recursively below `terraform/`.
-
-### Bash
-
-From repository root:
-
-```bash
-tflint --chdir=terraform --recursive --config "$(pwd)/.tflint.hcl"
-```
-
-### PowerShell
-
-```powershell
-$TFLINT_CONFIG = (Resolve-Path .tflint.hcl).Path
-tflint --chdir=terraform --recursive --config "$TFLINT_CONFIG"
-```
-
-### Current Result
-
-```text
-0 TFLint findings
-```
-
----
-
-# Checkov Security Scanning
-
-Checkov performs static security analysis across the Terraform codebase.
 
 Current validated result:
 
 ```text
-Passed checks:  84
-Failed checks:  0
-Skipped checks: 21
+Terraform tests: 20/20 passed
+TFLint:          0 findings
+
+Checkov:
+  Passed:        84
+  Failed:        0
+  Skipped:       21
 ```
 
-Skipped controls are not silently ignored.
-
-Each intentional exception contains an inline rationale describing why that control is outside the current development baseline.
-
-Examples include:
-
-```text
-AKS paid control-plane SLA
-AKS host encryption
-Customer-managed encryption keys
-Azure Monitor integration
-ACR geo-replication
-ACR quarantine preview functionality
-PostgreSQL geo-redundant backups
-Terraform backend Private Endpoint
-Legacy Storage Analytics controls
-```
-
-Many of these represent additional:
-
-```text
-production availability
-disaster recovery
-compliance
-cost
-deployment-specific networking
-```
-
-requirements rather than hidden failures in the current baseline.
+The Checkov skips are documented rather than silently ignored.
 
 ---
 
-# GitHub Actions — Terraform IaC CI
+# Checkov Skips
 
-Terraform has a dedicated workflow:
+Examples of intentionally documented skips include controls related to:
+
+- paid AKS SLA
+- host encryption
+- customer-managed encryption keys
+- multi-region ACR
+- PostgreSQL geo-redundant backups
+- Azure Monitor integration
+- private Terraform backend runner connectivity
+
+These represent deployment-specific decisions involving:
+
+```text
+Cost
+Availability
+Compliance
+Operational architecture
+Production hardening
+```
+
+rather than hidden failures in the baseline.
+
+---
+
+# Dedicated Terraform CI
+
+Terraform validation has a separate GitHub Actions workflow:
 
 ```text
 .github/workflows/terraform-ci.yml
 ```
 
-Infrastructure CI is deliberately separated from the application/container workflow.
-
-Conceptually:
+The pipeline contains independent jobs for:
 
 ```text
-Terraform IaC CI
-│
-├── Terraform Validate & Test
-│   ├── terraform fmt -check
-│   ├── terraform init -backend=false
-│   ├── terraform validate
-│   └── terraform test
-│
-├── TFLint
-│   └── Recursive Terraform / AzureRM linting
-│
-└── Checkov Security Scan
-    └── Terraform security-policy analysis
+Terraform Validate & Test
+TFLint
+Checkov Security Scan
 ```
 
-Each job can independently fail the workflow if its corresponding quality gate fails.
+The Terraform validation flow includes:
+
+```text
+terraform fmt -check
+terraform init -backend=false
+terraform validate
+terraform test
+```
+
+This keeps IaC validation separate from the application CI pipeline.
 
 ---
 
-# CI Safety Model
+# Why the Terraform CI Does Not Deploy Azure
 
-The current Terraform CI workflow intentionally contains no Azure authentication.
-
-It does not perform:
+The workflow intentionally contains no:
 
 ```text
+Azure credentials
 az login
-Azure service-principal authentication
 Azure OIDC authentication
 terraform apply
 live Azure provisioning
-real Azure infrastructure deployment
 ```
 
-The workflow is therefore an **offline Infrastructure as Code quality gate**, not a cloud deployment pipeline.
+The CI pipeline therefore acts as an **Infrastructure as Code quality gate**, not an Azure deployment pipeline.
 
-This distinction is intentional.
-
----
-
-# Security Model
-
-The Terraform architecture applies several security principles:
+The validation boundary is:
 
 ```text
-Private managed services where appropriate
-
-Private AKS control plane
-
-No public ACR endpoint
-
-No public application Storage endpoint
-
-PostgreSQL private VNet integration
-
-Separate network segments
-
-Dedicated NSGs
-
-Explicit managed identities
-
-Purpose-specific Azure RBAC
-
-Private DNS integration
-
-Storage Shared Key authentication disabled
-
-No plaintext Terraform deployment secrets committed to Git
-
-Terraform lifecycle protection for stateful resources
-
-Static security scanning
-
-Automated IaC validation in CI
-```
-
-Sensitive deployment values are intentionally excluded from source control.
-
-Files such as:
-
-```text
-terraform.tfvars
-*.tfstate
-backend.hcl
-```
-
-must remain local or be delivered through an appropriate secret/deployment mechanism.
-
----
-
-# Lifecycle Protection
-
-Stateful resources use Terraform lifecycle protection where accidental destruction would be particularly dangerous.
-
-Example:
-
-```hcl
-lifecycle {
-  prevent_destroy = true
-}
-```
-
-This protection is used for persistent resources such as:
-
-```text
-PostgreSQL
-Application Storage
-Terraform state infrastructure where appropriate
-```
-
-`prevent_destroy` is a guardrail.
-
-It is not a replacement for:
-
-```text
-backups
-restore testing
-disaster recovery
-change control
-```
-
----
-
-# Development Baseline vs Production Hardening
-
-This repository models a **production-oriented development baseline**.
-
-It does not claim to represent every control that would be required for a specific organization's real production environment.
-
-Additional production decisions could include:
-
-```text
-AKS paid control-plane SLA
-
-Host encryption
-
-Customer-managed encryption keys
-
-Multi-region disaster recovery
-
-Geo-replicated ACR
-
-Geo-redundant PostgreSQL backups
-
-Centralized Azure Monitor diagnostic settings
-
-Private Terraform backend runner connectivity
-
-Environment-specific Entra administration groups
-
-Formal backup and restore testing
-
-Production cost governance
-
-Budget alerts
-
-Policy enforcement at management-group/subscription level
-
-Private CI/CD runner architecture
-```
-
-These controls introduce additional availability, compliance, operational, networking, or cost requirements.
-
-They are intentionally separated from the current baseline rather than being implemented merely to increase feature count.
-
----
-
-# Infrastructure Validation Model
-
-Milestone 7 uses several independent quality layers.
-
-```text
-Terraform Source
+Terraform source
       ↓
-terraform fmt
+Formatting
       ↓
-terraform validate
+Static validation
       ↓
-Terraform Mock Tests
+Native mock tests
       ↓
 TFLint
       ↓
 Checkov
       ↓
-GitHub Actions IaC CI
+GitHub Actions
 ```
-
-Each layer answers a different question.
-
-| Layer | Purpose |
-|---|---|
-| `terraform fmt` | Is the Terraform consistently formatted? |
-| `terraform validate` | Is the configuration structurally valid? |
-| Terraform native tests | Are critical infrastructure invariants preserved? |
-| TFLint | Does the code violate Terraform or AzureRM linting rules? |
-| Checkov | Does static analysis identify security-policy weaknesses? |
-| GitHub Actions | Are the quality gates automatically enforced? |
-
-Passing all of these checks demonstrates configuration quality and consistency.
-
-It does **not** prove that Azure has successfully provisioned every resource.
-
-A real Azure deployment would remain a separate validation stage.
 
 ---
 
-# Validation Boundary
+# Executed Runtime vs Validated Blueprint
 
-The project deliberately distinguishes runtime validation from Infrastructure as Code validation.
+The project deliberately distinguishes between two kinds of evidence.
 
 ## Milestones 1–6
 
-The local Kind environment was actually executed and used to validate:
+Executed against the real local Kind environment:
 
 ```text
-FastAPI runtime behavior
-Kubernetes scheduling
-Helm packaging
-ArgoCD reconciliation
-Sealed Secrets
-NetworkPolicies
-Health probes
-Prometheus metrics
-Grafana dashboards
-Alertmanager
+Kubernetes
+GitOps
+Metrics
+Alerting
 Autoscaling
-In-cluster load testing
-Pod failure resilience
+Load testing
 Distributed tracing
-PostgreSQL fault injection
-Readiness behavior
-Automatic recovery
+Chaos experiments
+Recovery behavior
 ```
 
 ## Milestone 7
 
-The Azure infrastructure layer validates:
+Validated as Infrastructure as Code:
 
 ```text
-Azure resource architecture
-Terraform module composition
-Network segmentation
-Private connectivity design
-Managed identity relationships
-Azure RBAC relationships
-State architecture
-Static Terraform correctness
-Infrastructure invariants
-IaC security posture
-CI enforcement
+Terraform configuration
+Static validation
+Native Terraform tests
+TFLint
+Checkov
+GitHub Actions CI
 ```
 
-Therefore the project represents:
+Therefore:
 
 ```text
 Executed & Validated Local Runtime
                 +
-Validated Azure IaC Blueprint
+Validated Azure Infrastructure Blueprint
 ```
 
-It does not present unprovisioned Azure resources as a running cloud environment.
+The repository does not present the Azure architecture as if it were currently deployed.
 
 ---
 
-# What a Real Azure Deployment Would Add
+# What This Validation Does Not Prove
 
-A future live deployment would introduce another validation stage:
+The Terraform validation does not prove:
 
 ```text
-Terraform configuration
-        ↓
-Azure authentication
-        ↓
-Remote backend initialization
-        ↓
-terraform plan
-        ↓
-terraform apply
-        ↓
-Azure Resource Manager
-        ↓
-Real Azure resources
-        ↓
-AKS runtime validation
-        ↓
-ACR image pull validation
-        ↓
-PostgreSQL connectivity validation
-        ↓
-Private Endpoint / DNS validation
-        ↓
-End-to-end application deployment
+Successful terraform apply against Azure
+Real AKS runtime behavior
+Real Azure networking connectivity
+Managed PostgreSQL runtime performance
+Actual Private Endpoint DNS resolution
+Production failover behavior
+Real cloud cost characteristics
 ```
 
-That stage is intentionally outside the current portfolio validation boundary.
+Those require a provisioned Azure environment.
 
-No chargeable Azure resources were required to complete the current milestone.
+The repository deliberately avoids making those claims.
 
 ---
 
-# Milestone 7 Outcome
+# Why This Boundary Matters
 
-The completed Infrastructure as Code milestone demonstrates:
-
-```text
-Reusable Terraform Modules
-        ↓
-Azure Network Segmentation
-        ↓
-Targeted NSG Enforcement
-        ↓
-Private Managed Services
-        ↓
-Managed Identity & RBAC
-        ↓
-Remote State Architecture
-        ↓
-Offline Infrastructure Tests
-        ↓
-Terraform Linting
-        ↓
-Security Policy Scanning
-        ↓
-Dedicated IaC CI Pipeline
-```
-
-Final validated baseline:
+Static and mock-based Terraform validation can prove that:
 
 ```text
-Terraform test runs   20/20 passed
-TFLint                0 findings
-Checkov               84 passed
-                      0 failed
-                      21 documented skips
+Configuration is syntactically valid
+Modules compose correctly
+Expected planning invariants hold
+Linting passes
+Security policies are checked
 ```
 
-The resulting Terraform layer provides a **reproducible, security-conscious Azure infrastructure blueprint** while remaining cleanly separated from Helm-based Kubernetes packaging and ArgoCD-based GitOps reconciliation.
+It cannot prove that every cloud resource will behave correctly after real provisioning.
+
+Maintaining that distinction keeps the project evidence accurate.
+
+---
+
+# Relevant Files
+
+```text
+terraform/
+├── README.md
+├── bootstrap/
+├── environments/
+│   └── dev/
+│       ├── main.tf
+│       ├── variables.tf
+│       ├── outputs.tf
+│       ├── backend.hcl.example
+│       └── tests/
+└── modules/
+    ├── acr/
+    ├── aks/
+    ├── networking/
+    ├── postgresql/
+    └── storage/
+```
+
+The dedicated CI workflow is:
+
+```text
+.github/workflows/terraform-ci.yml
+```
+
+---
+
+# Validation Summary
+
+The Azure Infrastructure as Code layer currently demonstrates:
+
+```text
+Modular Terraform architecture
+Private Azure networking
+Separate AKS / PostgreSQL / Private Endpoint subnets
+Explicit NSG segmentation
+Private AKS
+Separate system and application node pools
+Azure CNI Overlay
+Cilium dataplane
+Workload Identity
+Azure RBAC
+Explicit managed identities
+Private ACR
+AcrPull managed-identity access
+Private PostgreSQL Flexible Server
+Private Blob Storage
+Private DNS
+Remote-state architecture
+Microsoft Entra based backend authorization
+20 Terraform native tests
+0 Terraform test failures
+0 TFLint findings
+84 Checkov passed checks
+0 Checkov failed checks
+21 documented skips
+Dedicated Infrastructure as Code CI
+No terraform apply
+No live Azure provisioning
+```
+
+The main result of this milestone is a reusable and security-oriented Azure Infrastructure as Code blueprint with clearly defined validation boundaries.
+
+---
+
+# Related Documentation
+
+- [Root Project README](../README.md)
+- [CI Pipeline & Security](../docs/ci-security.md)
+- [Kubernetes & Helm](../docs/kubernetes-helm.md)
+- [GitOps with ArgoCD](../docs/gitops.md)
+- [Observability & Alerting](../docs/observability.md)
+- [Load Testing & Resilience](../docs/load-testing.md)
+- [Distributed Tracing & Chaos Engineering](../docs/tracing-chaos.md)
